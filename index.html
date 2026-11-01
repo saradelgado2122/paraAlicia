@@ -1460,7 +1460,7 @@ function edInit(){
       E.base = v;
       const n = S.source[E.sel];
       if (n){ const ns = copyNotes(); setDur(ns, E.sel); commit(ns, E.sel); }
-      else { syncTools(); updateSel(); }
+      else { E.grace = false; syncTools(); updateSel(); }
     });
     $('durTools').appendChild(b);
   });
@@ -1480,7 +1480,7 @@ function edInit(){
     E.dot = !E.dot;
     const n = S.source[E.sel];
     if (n){ const ns = copyNotes(); setDur(ns, E.sel); commit(ns, E.sel); }
-    else { syncTools(); updateSel(); }
+    else { E.grace = false; syncTools(); updateSel(); }
   });
   $('eGrace').addEventListener('click', () => {
     const ns = copyNotes(), n = ns[E.sel];
@@ -1538,6 +1538,7 @@ function edInit(){
     const idx = E.layout.filter(L => L.x < x).length;
     const n = E.grace ? {step, acc: E.acc, dur: 0, grace: true} : {step, acc: E.acc, dur: eDur()};
     if (!n.grace) lyricInsert(pitchedBefore(ns, idx));
+    else E.grace = false;   // tras una nota de adorno se vuelve a escribir notas normales
     ns.splice(idx, 0, n);
     commit(ns, -1, idx === ns.length-1);
     soundStep(n);
