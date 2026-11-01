@@ -59,6 +59,9 @@ header p{margin:.4rem 0 0;color:var(--muted);max-width:62ch}
 
 .stage{margin-top:16px;border-radius:14px;background:var(--surface);border:1px solid var(--line);position:relative;overflow:hidden}
 canvas{display:block;width:100%;height:250px}
+#staff{touch-action:pan-y;cursor:grab}
+#staff:active{cursor:grabbing}
+#staff:focus-visible{outline:3px solid var(--orange);outline-offset:-3px}
 .prog{position:absolute;right:12px;top:8px;font-size:.85rem;color:var(--muted)}
 
 .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
@@ -98,6 +101,9 @@ textarea{width:100%;min-height:96px;font-family:"Space Mono",ui-monospace,monosp
 .check{display:flex;gap:8px;align-items:center;color:var(--ink);font-size:.95rem;min-height:36px}
 .check input{width:20px;height:20px;accent-color:var(--orange)}
 #parseErr{color:var(--red)}
+.lib{margin-top:10px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.lib h3{font-family:"Bricolage Grotesque",Inter,sans-serif;font-size:1.05rem;margin:0 0 6px}
+#libStatus{color:var(--ink);font-weight:500}
 .editor{margin-top:16px}
 .editor h3{font-family:"Bricolage Grotesque",Inter,sans-serif;font-size:1.05rem;margin:0}
 .tools{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0}
@@ -140,7 +146,7 @@ footer a{color:inherit}
   </section>
 
   <section class="stage">
-    <canvas id="staff" aria-label="Pentagrama con las notas de la partitura y la línea de tu voz"></canvas>
+    <canvas id="staff" tabindex="0" aria-label="Pentagrama con las notas de la partitura y la línea de tu voz. Fuera de la práctica se puede deslizar para ver todas las notas."></canvas>
     <div class="prog" id="prog"></div>
   </section>
 
@@ -168,6 +174,25 @@ footer a{color:inherit}
 
   <details id="panel" open>
     <summary>Partitura y ajustes</summary>
+    <div class="lib">
+      <h3>Mis partituras</h3>
+      <label class="f">Partitura abierta
+        <select id="libSel"></select>
+      </label>
+      <p class="hint" id="libStatus"></p>
+      <div class="row">
+        <button id="libNew">Nueva partitura</button>
+        <button id="libSaveAs">Guardar como nueva</button>
+        <button id="libRename">Renombrar</button>
+        <button id="libDel">Eliminar</button>
+      </div>
+      <div class="row">
+        <button id="libExport">Exportar copia</button>
+        <button id="libImport">Importar copia</button>
+        <input type="file" id="libFile" accept=".json,application/json" hidden>
+      </div>
+      <p class="hint">Las partituras se guardan en este navegador y los cambios se guardan solos. Exporta una copia de vez en cuando: te sirve de respaldo si se borran los datos del navegador y para pasar tus partituras a otro dispositivo.</p>
+    </div>
     <div class="grid">
       <label class="f">Partitura de ejemplo
         <select id="preset"></select>
@@ -326,10 +351,68 @@ const S = {
   mode:'wait', source:[], notes:[], syl:[], total:0, playable:0,
   cur:0, anim:0, running:false, finished:false,
   hold:0, lastOk:0, devs:[], results:[], needRelease:false, silentSince:0,
-  t0:0, transpose:0, playIdx:-1, refBusyUntil:0,
+  t0:0, transpose:0, pan:0, panMin:0, panMax:0, panToStart:false, playIdx:-1, refBusyUntil:0,
   beatMs:750, tBeat0:0, countBeats:4, beat:-1, acc:[], nextFinal:0, metroGain:null, shownCur:-2
 };
 let trail = [];
+
+/* ---------- Mis partituras ---------- */
+const LIBKEY = 'canto-biblioteca';
+let L = {items: [], active: null};
+const newId = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+const activeItem = () => L.items.find(x => x.id === L.active) || null;
+function saveLib(){ try{ localStorage.setItem(LIBKEY, JSON.stringify(L)); }catch(e){} }
+function loadLib(){
+  try{
+    const d = JSON.parse(localStorage.getItem(LIBKEY) || 'null');
+    if (d && Array.isArray(d.items)){
+      L = {items: d.items.filter(x => x && typeof x.score === 'string'), active: d.active || null};
+      if (!activeItem()) L.active = null;
+      return;
+    }
+  }catch(e){}
+  // Primera vez: conserva la partitura que hubiera escrita si no es un ejemplo
+  const sc = $('score').value.trim();
+  if (sc && !PRESETS.some(p => p[1] === sc)){
+    const it = {id:newId(), name:'Mi partitura'}; snapshot(it);
+    L.items.push(it); L.active = it.id;
+  }
+  saveLib();
+}
+function snapshot(it){
+  it.score = $('score').value; it.lyrics = $('lyrics').value;
+  it.bpm = $('bpm').value; it.meter = $('meter').value; it.updated = Date.now();
+}
+function refreshLib(){
+  const sel = $('libSel'); if (!sel) return;
+  sel.innerHTML = '';
+  const o0 = document.createElement('option'); o0.value = '';
+  o0.textContent = L.items.length ? '— Sin guardar —' : '— Todavía no hay partituras guardadas —';
+  sel.appendChild(o0);
+  [...L.items].sort((a,b) => a.name.localeCompare(b.name, 'es')).forEach(it => {
+    const o = document.createElement('option'); o.value = it.id; o.textContent = it.name; sel.appendChild(o);
+  });
+  sel.value = L.active || '';
+  const it = activeItem();
+  $('libRename').disabled = $('libDel').disabled = !it;
+  $('libExport').disabled = !L.items.length;
+  $('libStatus').textContent = it
+    ? 'Editando «' + it.name + '». Los cambios se guardan solos.'
+    : (S.source.some(n => !n.rest) ? 'Esta partitura no está en Mis partituras. Pulsa «Guardar como nueva» si quieres conservarla.' : '');
+}
+function openItem(it){
+  L.active = it.id; saveLib();
+  $('score').value = it.score || ''; $('lyrics').value = it.lyrics || '';
+  if (it.bpm) $('bpm').value = it.bpm;
+  if (it.meter) $('meter').value = it.meter;
+  $('preset').value = '';
+  S.syl = parseLyrics($('lyrics').value);
+  applyScore(); refreshLib();
+}
+function askName(def){
+  const n = prompt('Nombre de la partitura', def);
+  return n && n.trim() ? n.trim().slice(0, 80) : null;
+}
 let sung = null, recent = [], invalidCount = 0, sungRaw = null;
 
 function store(){
@@ -340,6 +423,9 @@ function store(){
       mode:S.mode, bpm:$('bpm').value, meter:$('meter').value, metro:$('metro').checked
     }));
   }catch(e){}
+  const it = activeItem();
+  if (it){ snapshot(it); saveLib(); }
+  refreshLib();
 }
 function load(){
   try{
@@ -411,6 +497,7 @@ function reset(){
   stopMetro();
   S.cur = 0; S.anim = 0; S.hold = 0; S.devs = []; S.results = []; S.needRelease = false;
   S.finished = false; S.running = false; S.beat = -1; S.acc = []; S.nextFinal = 0;
+  S.pan = 0; S.panToStart = false;
   $('summary').hidden = true; trail = [];
   if (S.mode === 'wait') skipRests();
   updateButtons(); updateTarget();
@@ -581,7 +668,7 @@ function finalizeRhythm(i){
 
 function finish(now){
   stopMetro();
-  S.running = false; S.finished = true;
+  S.running = false; S.finished = true; S.pan = 0; S.panToStart = true;
   const list = $('sList'); list.innerHTML = '';
   let ok = 0, part = 0, miss = 0, k = 0, ratios = [];
   S.notes.forEach((n,i) => {
@@ -796,7 +883,15 @@ function draw(now){
   const ppb = Math.max(56, Math.min(92, W/8));
   const spacing = Math.max(58, Math.min(80, W/9));
   const vb = rhythm ? (S.running ? S.beat : -0.4) : 0;
-  const xOf = i => rhythm ? px + (notes[i].start - vb)*ppb : px + (i - S.anim)*spacing;
+  const baseX = i => rhythm ? px + (notes[i].start - vb)*ppb : px + (i - S.anim)*spacing;
+  if (notes.length && !S.running){
+    S.panMin = Math.min(0, baseX(0) - px);
+    S.panMax = Math.max(0, baseX(notes.length-1) - px);
+    if (S.panToStart){ S.pan = S.panMin; S.panToStart = false; }
+    S.pan = Math.max(S.panMin, Math.min(S.panMax, S.pan));
+  }
+  const shift = S.running ? 0 : S.pan;
+  const xOf = i => baseX(i) - shift;
 
   // Líneas del pentagrama
   g.strokeStyle = colors.staff; g.lineWidth = 1.2; g.globalAlpha = 0.85;
@@ -806,7 +901,7 @@ function draw(now){
     const bpb = +$('meter').value;
     g.lineWidth = 1;
     for (let k=bpb; k<=S.total+0.001; k+=bpb){
-      const x = px + (k - vb)*ppb - ppb*0.18;
+      const x = px + (k - vb)*ppb - ppb*0.18 - shift;
       if (x < 60 || x > W) continue;
       g.beginPath(); g.moveTo(x, Y(clef.top)); g.lineTo(x, Y(clef.bottom)); g.stroke();
     }
@@ -840,7 +935,7 @@ function draw(now){
   // Notas
   for (let i=0;i<notes.length;i++){
     const n = notes[i], x = xOf(i);
-    const xEnd = rhythm ? px + (n.start + n.dur - vb)*ppb : x;
+    const xEnd = rhythm ? px + (n.start + n.dur - vb)*ppb - shift : x;
     if (xEnd < 50 || x > W + 30) continue;
     const res = S.results[i];
     const current = i === S.cur && (S.running || S.mode === 'wait') && !S.finished;
@@ -923,6 +1018,11 @@ function draw(now){
     g.beginPath(); g.arc(px, Y(clampS(contStep(last.m))), 5.5, 0, Math.PI*2); g.fill();
   }
 
+  // Aviso de deslizamiento
+  if (!S.running && S.panMax - S.panMin > 4){
+    g.fillStyle = colors.muted; g.font = '500 12px Inter, sans-serif'; g.textAlign = 'left'; g.textBaseline = 'middle';
+    g.fillText('‹  Desliza para ver todas las notas  ›', 14, 16);
+  }
   // Cuenta atrás
   if (rhythm && S.running && S.beat < 0){
     g.fillStyle = colors.orange; g.globalAlpha = 0.9;
@@ -1225,7 +1325,7 @@ $('btnStart').addEventListener('click', async () => {
   if (S.mode === 'rhythm'){ startRhythm(); return; }
   if (S.finished) reset();
   if (S.cur === 0 && !S.results.length){ S.t0 = performance.now(); S.noteT = S.t0; }
-  S.running = true; S.lastOk = 0; S.hold = 0;
+  S.running = true; S.lastOk = 0; S.hold = 0; S.pan = 0;
   if ($('autoRef').checked) playTone(S.notes[S.cur].midi, 0.6);
   updateButtons(); updateTarget();
 });
@@ -1252,12 +1352,88 @@ $('btnSkip').addEventListener('click', () => {
   advanceWait(performance.now(), true);
 });
 $('btnReset').addEventListener('click', reset);
+$('libSel').addEventListener('change', e => {
+  const it = L.items.find(x => x.id === e.target.value);
+  if (it) openItem(it); else { L.active = null; saveLib(); refreshLib(); }
+});
+$('libNew').addEventListener('click', () => {
+  const name = askName('Partitura ' + (L.items.length + 1)); if (!name) return;
+  const it = {id:newId(), name, score:'', lyrics:'', bpm:$('bpm').value, meter:$('meter').value, updated:Date.now()};
+  L.items.push(it); openItem(it);
+});
+$('libSaveAs').addEventListener('click', () => {
+  const cur = activeItem();
+  const name = askName(cur ? cur.name + ' (copia)' : 'Partitura ' + (L.items.length + 1)); if (!name) return;
+  const it = {id:newId(), name}; snapshot(it);
+  L.items.push(it); L.active = it.id; saveLib(); refreshLib();
+});
+$('libRename').addEventListener('click', () => {
+  const it = activeItem(); if (!it) return;
+  const name = askName(it.name); if (!name) return;
+  it.name = name; saveLib(); refreshLib();
+});
+$('libDel').addEventListener('click', () => {
+  const it = activeItem();
+  if (!it || !confirm('¿Eliminar «' + it.name + '» de Mis partituras? Seguirá en pantalla hasta que abras otra.')) return;
+  L.items = L.items.filter(x => x !== it); L.active = null; saveLib(); refreshLib();
+});
+$('libExport').addEventListener('click', () => {
+  const data = JSON.stringify({app:'Canto', version:1, exportada:new Date().toISOString(), partituras:L.items}, null, 2);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([data], {type:'application/json'}));
+  a.download = 'canto-partituras-' + new Date().toISOString().slice(0,10) + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+$('libImport').addEventListener('click', () => $('libFile').click());
+$('libFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try{
+    const d = JSON.parse(await f.text());
+    const list = Array.isArray(d) ? d : d.partituras;
+    if (!Array.isArray(list)) throw new Error('formato');
+    let added = 0, same = 0;
+    list.forEach(x => {
+      if (!x || typeof x.score !== 'string') return;
+      if (L.items.some(y => y.name === x.name && y.score === x.score && (y.lyrics || '') === (x.lyrics || ''))){ same++; return; }
+      L.items.push({id:newId(), name:String(x.name || 'Partitura importada').slice(0,80), score:x.score,
+        lyrics: typeof x.lyrics === 'string' ? x.lyrics : '', bpm: x.bpm || '80', meter: x.meter || '4', updated: Date.now()});
+      added++;
+    });
+    saveLib(); refreshLib();
+    alert(added ? 'Se han añadido ' + added + (added === 1 ? ' partitura' : ' partituras') + (same ? '; ' + same + ' ya estaban.' : '.') : 'No había partituras nuevas en el archivo.');
+  }catch(_){ alert('Ese archivo no es una copia de partituras de Canto.'); }
+});
+// Deslizar el pentagrama cuando no se está practicando
+let drag = null;
+cv.addEventListener('pointerdown', e => { if (S.running) return; drag = {x: e.clientX, pan: S.pan, moved: false, id: e.pointerId}; });
+cv.addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const dx = e.clientX - drag.x;
+  if (!drag.moved && Math.abs(dx) > 4){ drag.moved = true; try{ cv.setPointerCapture(e.pointerId); }catch(_){} }
+  if (drag.moved) S.pan = drag.pan - dx;
+});
+['pointerup','pointercancel'].forEach(ev => cv.addEventListener(ev, () => { drag = null; }));
+cv.addEventListener('wheel', e => {
+  if (S.running) return;
+  const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : (e.shiftKey ? e.deltaY : 0);
+  if (!d) return;
+  e.preventDefault(); S.pan += d;
+}, {passive: false});
+cv.addEventListener('keydown', e => {
+  if (S.running) return;
+  if (e.key === 'ArrowRight'){ e.preventDefault(); S.pan += 80; }
+  else if (e.key === 'ArrowLeft'){ e.preventDefault(); S.pan -= 80; }
+  else if (e.key === 'Home'){ e.preventDefault(); S.pan = S.panMin; }
+  else if (e.key === 'End'){ e.preventDefault(); S.pan = S.panMax; }
+});
 $('btnApply').addEventListener('click', () => applyScore());
 $('lyrics').addEventListener('input', () => { S.syl = parseLyrics($('lyrics').value); attachLyrics(); E.sylFor = -1; drawEditor(); updateSel(); store(); });
 $('mWait').addEventListener('click', () => setMode('wait'));
 $('mRhythm').addEventListener('click', () => setMode('rhythm'));
 $('preset').addEventListener('change', e => {
   const p = PRESETS[+e.target.value]; if (!p) return;
+  L.active = null; saveLib();
   $('score').value = p[1]; $('lyrics').value = p[2] || ''; S.syl = parseLyrics($('lyrics').value); applyScore();
 });
 $('tDown').addEventListener('click', () => { S.transpose = Math.max(-12, S.transpose-1); buildNotes(); reset(); store(); });
@@ -1271,9 +1447,11 @@ const opt0 = document.createElement('option'); opt0.textContent = 'Elige una…'
 PRESETS.forEach((p,i) => { const o = document.createElement('option'); o.value = i; o.textContent = p[0]; sel.appendChild(o); });
 const had = load();
 if (!had) $('score').value = PRESETS[0][1];
+loadLib();
 { S.syl = parseLyrics($('lyrics').value); const {notes} = parseScore($('score').value); S.source = notes; buildNotes(); }
 setMode(S.mode);
 edInit();
+refreshLib();
 requestAnimationFrame(frame);
 // Pide el permiso del micrófono nada más abrir la página
 ensureMic();
