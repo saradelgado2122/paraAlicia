@@ -182,7 +182,7 @@ footer a{color:inherit}
       <p class="hint" id="libStatus"></p>
       <div class="row">
         <button id="libNew">Nueva partitura</button>
-        <button id="libSaveAs">Guardar como nueva</button>
+        <button id="libSaveAs">Duplicar</button>
         <button id="libRename">Renombrar</button>
         <button id="libDel">Eliminar</button>
       </div>
@@ -191,12 +191,9 @@ footer a{color:inherit}
         <button id="libImport">Importar copia</button>
         <input type="file" id="libFile" accept=".json,application/json" hidden>
       </div>
-      <p class="hint">Las partituras se guardan en este navegador y los cambios se guardan solos. Exporta una copia de vez en cuando: te sirve de respaldo si se borran los datos del navegador y para pasar tus partituras a otro dispositivo.</p>
+      <p class="hint">Los ejemplos están al final de la lista; si modificas uno, se guarda como partitura tuya y el original no cambia. Todo se guarda solo en este navegador. Exporta una copia de vez en cuando: te sirve de respaldo si se borran los datos del navegador y para pasar tus partituras a otro dispositivo.</p>
     </div>
     <div class="grid">
-      <label class="f">Partitura de ejemplo
-        <select id="preset"></select>
-      </label>
       <label class="f">Tolerancia de afinación
         <select id="tol">
           <option value="15">Estricta (±15 cents)</option>
@@ -358,7 +355,7 @@ let trail = [];
 
 /* ---------- Mis partituras ---------- */
 const LIBKEY = 'canto-biblioteca';
-let L = {items: [], active: null};
+let L = {items: [], active: null, example: null};
 const newId = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
 const activeItem = () => L.items.find(x => x.id === L.active) || null;
 function saveLib(){ try{ localStorage.setItem(LIBKEY, JSON.stringify(L)); }catch(e){} }
@@ -366,7 +363,7 @@ function loadLib(){
   try{
     const d = JSON.parse(localStorage.getItem(LIBKEY) || 'null');
     if (d && Array.isArray(d.items)){
-      L = {items: d.items.filter(x => x && typeof x.score === 'string'), active: d.active || null};
+      L = {items: d.items.filter(x => x && typeof x.score === 'string'), active: d.active || null, example: Number.isInteger(d.example) ? d.example : null};
       if (!activeItem()) L.active = null;
       return;
     }
@@ -386,26 +383,46 @@ function snapshot(it){
 function refreshLib(){
   const sel = $('libSel'); if (!sel) return;
   sel.innerHTML = '';
-  const o0 = document.createElement('option'); o0.value = '';
-  o0.textContent = L.items.length ? '— Sin guardar —' : '— Todavía no hay partituras guardadas —';
-  sel.appendChild(o0);
-  [...L.items].sort((a,b) => a.name.localeCompare(b.name, 'es')).forEach(it => {
-    const o = document.createElement('option'); o.value = it.id; o.textContent = it.name; sel.appendChild(o);
-  });
-  sel.value = L.active || '';
   const it = activeItem();
+  if (!it && L.example === null){
+    const o0 = document.createElement('option'); o0.value = ''; o0.textContent = 'Elige una partitura…'; sel.appendChild(o0);
+  }
+  const g1 = document.createElement('optgroup'); g1.label = 'Mis partituras';
+  if (!L.items.length){ const o = document.createElement('option'); o.disabled = true; o.textContent = '(todavía ninguna)'; g1.appendChild(o); }
+  [...L.items].sort((a,b) => a.name.localeCompare(b.name, 'es')).forEach(x => {
+    const o = document.createElement('option'); o.value = x.id; o.textContent = x.name; g1.appendChild(o);
+  });
+  const g2 = document.createElement('optgroup'); g2.label = 'Ejemplos';
+  PRESETS.forEach((p,i) => { const o = document.createElement('option'); o.value = 'ex:' + i; o.textContent = p[0]; g2.appendChild(o); });
+  sel.appendChild(g1); sel.appendChild(g2);
+  sel.value = it ? it.id : (L.example !== null ? 'ex:' + L.example : '');
   $('libRename').disabled = $('libDel').disabled = !it;
   $('libExport').disabled = !L.items.length;
   $('libStatus').textContent = it
     ? 'Editando «' + it.name + '». Los cambios se guardan solos.'
-    : (S.source.some(n => !n.rest) ? 'Esta partitura no está en Mis partituras. Pulsa «Guardar como nueva» si quieres conservarla.' : '');
+    : (L.example !== null ? 'Es un ejemplo. Si lo modificas, se guardará en Mis partituras como «' + PRESETS[L.example][0] + ' (mi versión)».' : '');
+}
+function uniqueName(base){
+  let n = base, k = 2;
+  while (L.items.some(x => x.name === n)) n = base + ' ' + (k++);
+  return n;
+}
+function matchPreset(){
+  const sc = $('score').value, ly = $('lyrics').value;
+  return PRESETS.findIndex(p => p[1] === sc && (ly === '' || ly === (p[2] || '')));
+}
+function loadExample(i){
+  const p = PRESETS[i]; if (!p) return;
+  L.active = null; L.example = i; saveLib();
+  $('score').value = p[1]; $('lyrics').value = p[2] || '';
+  S.syl = parseLyrics($('lyrics').value);
+  applyScore(); refreshLib();
 }
 function openItem(it){
-  L.active = it.id; saveLib();
+  L.active = it.id; L.example = null; saveLib();
   $('score').value = it.score || ''; $('lyrics').value = it.lyrics || '';
   if (it.bpm) $('bpm').value = it.bpm;
   if (it.meter) $('meter').value = it.meter;
-  $('preset').value = '';
   S.syl = parseLyrics($('lyrics').value);
   applyScore(); refreshLib();
 }
@@ -423,8 +440,19 @@ function store(){
       mode:S.mode, bpm:$('bpm').value, meter:$('meter').value, metro:$('metro').checked
     }));
   }catch(e){}
-  const it = activeItem();
-  if (it){ snapshot(it); saveLib(); }
+  let it = activeItem();
+  if (!it){
+    // Cualquier cambio que no sea un ejemplo intacto se guarda solo como partitura propia
+    const mp = matchPreset();
+    if (mp >= 0) L.example = mp;
+    else if ($('score').value.trim() || $('lyrics').value.trim()){
+      const base = L.example !== null && PRESETS[L.example] ? PRESETS[L.example][0] + ' (mi versión)' : 'Partitura sin título';
+      it = {id:newId(), name:uniqueName(base)};
+      L.items.push(it); L.active = it.id; L.example = null;
+    }
+  }
+  if (it) snapshot(it);
+  saveLib();
   refreshLib();
 }
 function load(){
@@ -1353,8 +1381,10 @@ $('btnSkip').addEventListener('click', () => {
 });
 $('btnReset').addEventListener('click', reset);
 $('libSel').addEventListener('change', e => {
-  const it = L.items.find(x => x.id === e.target.value);
-  if (it) openItem(it); else { L.active = null; saveLib(); refreshLib(); }
+  const v = e.target.value;
+  if (v.startsWith('ex:')) { loadExample(+v.slice(3)); return; }
+  const it = L.items.find(x => x.id === v);
+  if (it) openItem(it);
 });
 $('libNew').addEventListener('click', () => {
   const name = askName('Partitura ' + (L.items.length + 1)); if (!name) return;
@@ -1363,9 +1393,10 @@ $('libNew').addEventListener('click', () => {
 });
 $('libSaveAs').addEventListener('click', () => {
   const cur = activeItem();
-  const name = askName(cur ? cur.name + ' (copia)' : 'Partitura ' + (L.items.length + 1)); if (!name) return;
+  const base = cur ? cur.name + ' (copia)' : (L.example !== null ? PRESETS[L.example][0] + ' (mi versión)' : 'Partitura ' + (L.items.length + 1));
+  const name = askName(uniqueName(base)); if (!name) return;
   const it = {id:newId(), name}; snapshot(it);
-  L.items.push(it); L.active = it.id; saveLib(); refreshLib();
+  L.items.push(it); L.active = it.id; L.example = null; saveLib(); refreshLib();
 });
 $('libRename').addEventListener('click', () => {
   const it = activeItem(); if (!it) return;
@@ -1374,8 +1405,10 @@ $('libRename').addEventListener('click', () => {
 });
 $('libDel').addEventListener('click', () => {
   const it = activeItem();
-  if (!it || !confirm('¿Eliminar «' + it.name + '» de Mis partituras? Seguirá en pantalla hasta que abras otra.')) return;
-  L.items = L.items.filter(x => x !== it); L.active = null; saveLib(); refreshLib();
+  if (!it || !confirm('¿Eliminar «' + it.name + '» de Mis partituras?')) return;
+  L.items = L.items.filter(x => x !== it); L.active = null; saveLib();
+  const next = [...L.items].sort((a,b) => a.name.localeCompare(b.name, 'es'))[0];
+  if (next) openItem(next); else loadExample(0);
 });
 $('libExport').addEventListener('click', () => {
   const data = JSON.stringify({app:'Para Alicia', version:1, exportada:new Date().toISOString(), partituras:L.items}, null, 2);
@@ -1431,20 +1464,12 @@ $('btnApply').addEventListener('click', () => applyScore());
 $('lyrics').addEventListener('input', () => { S.syl = parseLyrics($('lyrics').value); attachLyrics(); E.sylFor = -1; drawEditor(); updateSel(); store(); });
 $('mWait').addEventListener('click', () => setMode('wait'));
 $('mRhythm').addEventListener('click', () => setMode('rhythm'));
-$('preset').addEventListener('change', e => {
-  const p = PRESETS[+e.target.value]; if (!p) return;
-  L.active = null; saveLib();
-  $('score').value = p[1]; $('lyrics').value = p[2] || ''; S.syl = parseLyrics($('lyrics').value); applyScore();
-});
 $('tDown').addEventListener('click', () => { S.transpose = Math.max(-12, S.transpose-1); buildNotes(); reset(); store(); });
 $('tUp').addEventListener('click', () => { S.transpose = Math.min(12, S.transpose+1); buildNotes(); reset(); store(); });
 ['tol','hold','anyOct','names','autoRef','metro'].forEach(id => $(id).addEventListener('change', store));
 ['bpm','meter'].forEach(id => $(id).addEventListener('change', () => { if (S.mode === 'rhythm') reset(); store(); drawEditor(); }));
 
 // Inicio
-const sel = $('preset');
-const opt0 = document.createElement('option'); opt0.textContent = 'Elige una…'; opt0.value = ''; sel.appendChild(opt0);
-PRESETS.forEach((p,i) => { const o = document.createElement('option'); o.value = i; o.textContent = p[0]; sel.appendChild(o); });
 const had = load();
 if (!had) $('score').value = PRESETS[0][1];
 loadLib();
