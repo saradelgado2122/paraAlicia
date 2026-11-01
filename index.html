@@ -1149,8 +1149,9 @@ function draw(now){
       g.fillStyle = colors.muted;
       if (musicFontOk){
         g.font = (gap*2.4).toFixed(0) + 'px "Noto Music"'; g.textAlign = 'center'; g.textBaseline = 'middle';
-        g.fillText('𝄽', x, Y(clef.center));
+        g.fillText(RESTG[splitDur(n.dur).base], x, Y(clef.center));
       } else g.fillRect(x-6, Y(clef.center)-3, 12, 6);
+      if (splitDur(n.dur).dot){ g.beginPath(); g.arc(x + 12, Y(clef.center + 1), 2.4, 0, Math.PI*2); g.fill(); }
       if (rhythm && n.dur > 1){
         g.globalAlpha *= 0.25; g.fillRect(x+8, Y(clef.center)-1, Math.max(0, xEnd - x - 14), 2);
       }
@@ -1194,8 +1195,25 @@ function draw(now){
     for (let s = clef.top+2; s <= n.step; s += 2){ g.beginPath(); g.moveTo(x-13,Y(s)); g.lineTo(x+13,Y(s)); g.stroke(); }
     // cabeza (hueca si dura 2 pulsos o más)
     g.fillStyle = col; g.strokeStyle = col;
+    const fig = splitDur(n.dur);
     g.beginPath(); g.ellipse(x, y, half*1.05, half*0.78, -0.35, 0, Math.PI*2);
-    if (n.dur >= 2){ g.lineWidth = 2.2; g.stroke(); } else g.fill();
+    if (fig.base >= 2){ g.lineWidth = 2.2; g.stroke(); } else g.fill();
+    // plica y corchetes, igual que en el editor
+    if (fig.base <= 2){
+      const up = n.step < clef.center;
+      const sx = up ? x + half*0.98 : x - half*0.98, ey = up ? y - gap*3.3 : y + gap*3.3;
+      g.lineWidth = 1.6; g.beginPath(); g.moveTo(sx, y); g.lineTo(sx, ey); g.stroke();
+      const flags = fig.base === 0.5 ? 1 : (fig.base === 0.25 ? 2 : 0), dir = up ? 1 : -1;
+      g.lineWidth = 2.2;
+      for (let k=0;k<flags;k++){
+        const fy = ey + dir*k*gap*0.75;
+        g.beginPath(); g.moveTo(sx, fy); g.quadraticCurveTo(sx + gap*1.1, fy + dir*gap*0.8, sx + gap*0.75, fy + dir*gap*1.9); g.stroke();
+      }
+    }
+    if (fig.dot){
+      const onLine = (((n.step - clef.bottom) % 2) + 2) % 2 === 0;
+      g.beginPath(); g.arc(x + half*2.1, onLine ? y - half : y, 2.4, 0, Math.PI*2); g.fill();
+    }
     if (n.acc){
       g.font = (gap*1.5).toFixed(0) + 'px "Noto Music", "Segoe UI Symbol", serif';
       g.textAlign = 'center'; g.textBaseline = 'middle';
