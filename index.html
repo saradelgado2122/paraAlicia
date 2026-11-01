@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Canto — sigue la partitura con tu voz</title>
+<title>Para Alicia — sigue la partitura con tu voz</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600&family=Space+Mono&family=Noto+Music&display=swap" rel="stylesheet">
@@ -128,7 +128,7 @@ footer a{color:inherit}
 </head>
 <body>
 <header>
-  <h1>Canto</h1>
+  <h1>Para Alicia</h1>
   <p id="intro">Canta la nota marcada en naranja. Cuando la mantienes afinada, la partitura avanza a la siguiente.</p>
   <div class="modes" role="group" aria-label="Modo de práctica">
     <button id="mWait" aria-pressed="true">Nota a nota</button>
@@ -268,7 +268,7 @@ footer a{color:inherit}
   </details>
 </main>
 <footer>
-  Canto, de Sara Delgado Rivero (sdelriv@canariaseducacion.es). Licencia <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/deed.es" target="_blank" rel="noopener">CC BY-NC-ND 4.0</a>: Reconocimiento-NoComercial-SinObraDerivada. El audio se analiza en tu dispositivo; no se graba ni se envía nada.
+  Para Alicia, de Sara Delgado Rivero (sdelriv@canariaseducacion.es). Licencia <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/deed.es" target="_blank" rel="noopener">CC BY-NC-ND 4.0</a>: Reconocimiento-NoComercial-SinObraDerivada. El audio se analiza en tu dispositivo; no se graba ni se envía nada.
 </footer>
 
 <script>
@@ -1378,10 +1378,10 @@ $('libDel').addEventListener('click', () => {
   L.items = L.items.filter(x => x !== it); L.active = null; saveLib(); refreshLib();
 });
 $('libExport').addEventListener('click', () => {
-  const data = JSON.stringify({app:'Canto', version:1, exportada:new Date().toISOString(), partituras:L.items}, null, 2);
+  const data = JSON.stringify({app:'Para Alicia', version:1, exportada:new Date().toISOString(), partituras:L.items}, null, 2);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([data], {type:'application/json'}));
-  a.download = 'canto-partituras-' + new Date().toISOString().slice(0,10) + '.json';
+  a.download = 'para-alicia-partituras-' + new Date().toISOString().slice(0,10) + '.json';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 });
@@ -1402,7 +1402,7 @@ $('libFile').addEventListener('change', async e => {
     });
     saveLib(); refreshLib();
     alert(added ? 'Se han añadido ' + added + (added === 1 ? ' partitura' : ' partituras') + (same ? '; ' + same + ' ya estaban.' : '.') : 'No había partituras nuevas en el archivo.');
-  }catch(_){ alert('Ese archivo no es una copia de partituras de Canto.'); }
+  }catch(_){ alert('Ese archivo no es una copia de partituras de Para Alicia.'); }
 });
 // Deslizar el pentagrama cuando no se está practicando
 let drag = null;
