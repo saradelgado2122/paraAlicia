@@ -282,7 +282,7 @@ footer a{color:inherit}
       <label class="f" id="sylBox" hidden>Sílaba de la nota seleccionada (pulsa Intro para pasar a la siguiente nota)
         <input type="text" id="eSyl" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Por ejemplo: tre- (con guion si la palabra sigue)" enterkeyhint="next">
       </label>
-      <p class="hint">Elige una figura y toca el pentagrama a la altura de la nota: se añade al final, o entre dos notas si tocas entre ellas. Toca una nota para seleccionarla; entonces puedes cambiarle la figura, el puntillo o la alteración, moverla con las flechas o tocando otra altura en su misma columna, convertirla en silencio o borrarla. Con teclado: flechas para mover y cambiar de nota, Supr para borrar.</p>
+      <p class="hint">Elige una figura y toca el pentagrama a la altura de la nota: se añade al final, o entre dos notas si tocas entre ellas. Toca una nota para seleccionarla; entonces puedes cambiarle la figura, el puntillo o la alteración, moverla con las flechas o tocando otra altura en su misma columna, convertirla en silencio o borrarla. Para ponerle un adorno, selecciona la nota principal y pulsa Adorno: aparece delante y lo subes o bajas con las flechas. Con teclado: flechas para mover y cambiar de nota, Supr para borrar.</p>
     </div>
     <label class="f" style="margin-top:12px">Notas de la partitura (se actualizan solas al usar el pentagrama)
       <textarea id="score" spellcheck="false"></textarea>
@@ -1310,6 +1310,10 @@ function draw(now){
         g.fillText(RESTG[splitDur(n.dur).base], x, Y(clef.center));
       } else g.fillRect(x-6, Y(clef.center)-3, 12, 6);
       if (splitDur(n.dur).dot){ g.beginPath(); g.arc(x + 12, Y(clef.center + 1), 2.4, 0, Math.PI*2); g.fill(); }
+      if (showNames){
+        g.font = '500 11px Inter, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+        g.fillText(restLabel(n.dur), x, hasLyr ? H - 32 : H - 12);
+      }
       if (rhythm && n.dur > 1){
         g.globalAlpha *= 0.25; g.fillRect(x+8, Y(clef.center)-1, Math.max(0, xEnd - x - 14), 2);
       }
@@ -1462,6 +1466,7 @@ function splitDur(d){
   }
   return {base: d>=4?4 : d>=2?2 : d>=1?1 : d>=0.5?0.5 : 0.25, dot:false};
 }
+const restLabel = d => (+d.toFixed(3)).toString().replace('.', ',') + (Math.abs(d - 1) < 1e-9 ? ' pulso' : ' pulsos');
 const figName = d => { const {base,dot} = splitDur(d); return FIG.find(f => f[0] === base)[1].toLowerCase() + (dot ? ' con puntillo' : ''); };
 function serialize(notes){
   const bpb = +$('meter').value; let beats = 0; const out = [];
@@ -1562,6 +1567,9 @@ function drawEditor(){
       if (musicFontOk){ c.font = (gap*2.6) + 'px "Noto Music"'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(RESTG[base], nx, Y(clef.center)); }
       else c.fillRect(nx-6, Y(clef.center)-4, 12, 8);
       if (dot){ c.beginPath(); c.arc(nx + 12, Y(clef.center+1), 2.2, 0, Math.PI*2); c.fill(); }
+      c.fillStyle = sel ? colors.orange : colors.muted; c.font = '500 11px Inter, sans-serif';
+      c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+      c.fillText(restLabel(n.dur), nx, H - 10);
       return;
     }
     const y = Y(n.step);
@@ -1661,10 +1669,12 @@ function edInit(){
   $('eGrace').addEventListener('click', () => {
     const ns = copyNotes(), n = ns[E.sel];
     if (n && !n.rest){
-      const pi = pitchedBefore(ns, E.sel);
-      if (n.grace){ delete n.grace; n.dur = eDur(); lyricInsert(pi); }
-      else { lyricRemove(pi); n.grace = true; n.dur = 0; }
-      commit(ns, E.sel); return;
+      if (n.grace){ delete n.grace; n.dur = eDur(); lyricInsert(pitchedBefore(ns, E.sel)); commit(ns, E.sel); return; }
+      // Añade un adorno delante de la nota seleccionada, un grado por encima; luego se mueve con ↑ ↓
+      const cl = edClef();
+      const gn = {step: Math.min(cl.center + 12, n.step + 1), acc: 0, dur: 0, grace: true};
+      ns.splice(E.sel, 0, gn); E.grace = false;
+      commit(ns, E.sel); soundStep(gn); return;
     }
     E.grace = !E.grace; syncTools(); updateSel();
   });
@@ -1703,7 +1713,7 @@ function edInit(){
     const cl = edClef();
     const step = Math.max(cl.center-12, Math.min(cl.center+12, cl.center + Math.round((100 - y)/6)));
     const ns = copyNotes();
-    const hit = E.layout.findIndex(L => Math.abs(x - L.x) <= L.hw);
+    const hit = E.layout.findIndex(L => Math.abs(x - L.x) <= Math.min(L.hw, 14));   // deja huecos entre notas para poder insertar
     if (hit >= 0){
       if (E.sel === hit && !ns[hit].rest && ns[hit].step !== step){ ns[hit].step = step; commit(ns, hit); soundStep(ns[hit]); return; }
       E.sel = E.sel === hit ? -1 : hit;
