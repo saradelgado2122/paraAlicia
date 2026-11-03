@@ -100,6 +100,8 @@ textarea{width:100%;min-height:96px;font-family:"Space Mono",ui-monospace,monosp
 .stepper output{min-width:3.5ch;text-align:center;font-family:"Space Mono",ui-monospace,monospace;color:var(--ink)}
 .check{display:flex;gap:8px;align-items:center;color:var(--ink);font-size:.95rem;min-height:36px}
 .check input{width:20px;height:20px;accent-color:var(--orange)}
+input[type=range]{accent-color:var(--orange);min-height:44px}
+#songSync{touch-action:manipulation;min-width:14rem}
 #parseErr{color:var(--red)}
 .lib{margin-top:10px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
 .lib h3{font-family:"Bricolage Grotesque",Inter,sans-serif;font-size:1.05rem;margin:0 0 6px}
@@ -189,9 +191,36 @@ footer a{color:inherit}
       <div class="row">
         <button id="libExport">Exportar copia</button>
         <button id="libImport">Importar copia</button>
-        <input type="file" id="libFile" accept=".json,application/json" hidden>
+        <button id="libDrive" hidden>Importar de Google Drive</button>
+        <button id="libDriveLink" hidden>Importar desde un enlace de Drive</button>
+        <input type="file" id="libFile" accept=".json,application/json,text/plain" multiple hidden>
       </div>
       <p class="hint">Los ejemplos están al final de la lista; si modificas uno, se guarda como partitura tuya y el original no cambia. Todo se guarda solo en este navegador. Exporta una copia de vez en cuando: te sirve de respaldo si se borran los datos del navegador y para pasar tus partituras a otro dispositivo.</p>
+    </div>
+    <div class="lib onlyRhythm" id="songBox">
+      <h3>Canción de acompañamiento</h3>
+      <p class="hint">Elige el audio de la canción (MP3, M4A, WAV…). Al pulsar Empezar sonará la canción y la app comprobará tus notas al ritmo de la partitura. Usa auriculares: si la canción sale por el altavoz, el micrófono también la oye y se confunde.</p>
+      <div class="row">
+        <button id="songPick">Elegir canción</button>
+        <button id="songClear" hidden>Quitar canción</button>
+        <input type="file" id="songFile" accept="audio/*" hidden>
+      </div>
+      <p class="hint" id="songStatus"></p>
+      <div class="grid" id="songOpts" hidden>
+        <label class="f">La partitura empieza en el segundo
+          <input type="number" id="songOffset" min="0" step="0.05" value="0">
+        </label>
+        <label class="f">Volumen de la canción
+          <input type="range" id="songVol" min="0" max="1" step="0.05" value="0.8">
+        </label>
+      </div>
+      <div id="songSyncRow" hidden>
+        <p class="hint">Para ajustar el inicio y el tempo, pulsa «Sincronizar tocando»: sonará la canción. Toca el botón justo cuando empiece la primera nota de la partitura y sigue tocando en cada pulso; con cuatro toques o más se calcula también el tempo. Después pulsa Terminar.</p>
+        <div class="row">
+          <button id="songSync">Sincronizar tocando</button>
+          <button id="songSyncDone" hidden>Terminar</button>
+        </div>
+      </div>
     </div>
     <div class="grid">
       <label class="f">Tolerancia de afinación
@@ -388,6 +417,7 @@ function loadLib(){
 function snapshot(it){
   it.score = $('score').value; it.lyrics = $('lyrics').value;
   it.bpm = $('bpm').value; it.meter = $('meter').value; it.updated = Date.now();
+  it.songOffset = $('songOffset').value;
 }
 function refreshLib(){
   const sel = $('libSel'); if (!sel) return;
@@ -422,7 +452,7 @@ function matchPreset(){
 }
 function loadExample(i){
   const p = PRESETS[i]; if (!p) return;
-  L.active = null; L.example = i; saveLib();
+  L.active = null; L.example = i; saveLib(); clearSong();
   $('score').value = p[1]; $('lyrics').value = p[2] || '';
   S.syl = parseLyrics($('lyrics').value);
   applyScore(); refreshLib();
@@ -432,8 +462,124 @@ function openItem(it){
   $('score').value = it.score || ''; $('lyrics').value = it.lyrics || '';
   if (it.bpm) $('bpm').value = it.bpm;
   if (it.meter) $('meter').value = it.meter;
+  $('songOffset').value = it.songOffset || '0';
   S.syl = parseLyrics($('lyrics').value);
   applyScore(); refreshLib();
+  loadSongFor(it.id);
+}
+/* ---------- Canción de acompañamiento ---------- */
+const SONG = {buffer:null, blob:null, name:'', src:null, gain:null, forId:null, seq:0};
+let sync = null;
+let songDb = null;
+function idb(){
+  return new Promise((ok, ko) => {
+    if (songDb) return ok(songDb);
+    if (!window.indexedDB) return ko(new Error('sin IndexedDB'));
+    const r = indexedDB.open('para-alicia-canciones', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('songs');
+    r.onsuccess = () => { songDb = r.result; ok(songDb); };
+    r.onerror = () => ko(r.error);
+  });
+}
+async function idbOp(mode, fn){
+  const db = await idb();
+  return new Promise((ok, ko) => {
+    const tx = db.transaction('songs', mode), req = fn(tx.objectStore('songs'));
+    tx.oncomplete = () => ok(req ? req.result : undefined);
+    tx.onerror = () => ko(tx.error);
+  });
+}
+const songPut = (id, blob, name) => idbOp('readwrite', st => st.put({blob, name}, id)).catch(() => {});
+const songGet = id => idbOp('readonly', st => st.get(id)).catch(() => null);
+const songDel = id => idbOp('readwrite', st => st.delete(id)).catch(() => {});
+const fmtTime = s => Math.floor(s/60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+
+function songUI(msg){
+  const has = !!SONG.buffer;
+  $('songClear').hidden = !has; $('songOpts').hidden = !has; $('songSyncRow').hidden = !has;
+  $('songPick').textContent = has ? 'Cambiar canción' : 'Elegir canción';
+  $('songStatus').textContent = msg || (has
+    ? '«' + SONG.name + '» (' + fmtTime(SONG.buffer.duration) + '). Al pulsar Empezar sonará con la partitura.' + (SONG.forId ? '' : ' Se guardará en cuanto la partitura esté en Mis partituras.')
+    : 'Sin canción: al pulsar Empezar suena el metrónomo.');
+}
+async function setSongBlob(blob, name, id, persist){
+  const seq = ++SONG.seq;
+  songUI('Preparando la canción…');
+  try{
+    const c = ensureCtx();
+    const ab = await blob.arrayBuffer();
+    const buf = await new Promise((ok, ko) => { const p = c.decodeAudioData(ab, ok, ko); if (p && p.catch) p.catch(ko); });
+    if (seq !== SONG.seq) return;
+    SONG.buffer = buf; SONG.blob = blob; SONG.name = name; SONG.forId = id || null;
+    if (id && persist) songPut(id, blob, name);
+    songUI();
+  }catch(e){
+    if (seq !== SONG.seq) return;
+    SONG.buffer = SONG.blob = null; SONG.name = ''; SONG.forId = null;
+    songUI('No se ha podido leer ese archivo de audio. Prueba con un MP3, M4A o WAV.');
+  }
+}
+function clearSong(){
+  SONG.seq++; syncStop(false); stopSong();
+  SONG.buffer = SONG.blob = null; SONG.name = ''; SONG.forId = null;
+  songUI();
+}
+async function loadSongFor(id){
+  clearSong();
+  if (!id) return;
+  const rec = await songGet(id);
+  if (rec && rec.blob && L.active === id) setSongBlob(rec.blob, rec.name || 'Canción', id, false);
+}
+function playSong(when, from){
+  stopSong();
+  const c = ensureCtx();
+  SONG.gain = c.createGain(); SONG.gain.gain.value = +$('songVol').value;
+  SONG.src = c.createBufferSource(); SONG.src.buffer = SONG.buffer;
+  SONG.src.connect(SONG.gain); SONG.gain.connect(c.destination);
+  SONG.src.start(when, from || 0);
+}
+function stopSong(fade){
+  if (!SONG.src) return;
+  const src = SONG.src, g = SONG.gain; SONG.src = null; SONG.gain = null;
+  try{
+    if (fade){ const t = ctx.currentTime; g.gain.setTargetAtTime(0, t, 0.35); src.stop(t + 1.6); }
+    else src.stop();
+  }catch(e){}
+}
+function syncStop(apply){
+  if (!sync) return;
+  const taps = sync.taps; sync = null;
+  stopSong();
+  $('songSync').textContent = 'Sincronizar tocando'; $('songSyncDone').hidden = true;
+  if (!apply || !taps.length) return;
+  let msg = '';
+  if (taps.length >= 4){
+    const iv = taps.slice(1).map((t,i) => t - taps[i]).sort((a,b) => a - b);
+    const b = Math.round(60/iv[iv.length >> 1]);
+    if (b >= 40 && b <= 200){ $('bpm').value = b; msg = ' El tempo es de ' + b + ' negras por minuto.'; }
+  }
+  // El primer toque marca la primera nota; si la partitura empieza con silencios, se descuentan
+  const first = S.notes.find(n => !n.rest && !n.grace);
+  const off = Math.max(0, taps[0] - (first ? first.start : 0)*60/bpm());
+  $('songOffset').value = off.toFixed(2);
+  store(); if (S.mode === 'rhythm') reset();
+  alert('Sincronizado: la partitura empieza en el segundo ' + fmt(off, 2) + '.' + msg);
+}
+function syncTap(){
+  if (!SONG.buffer || S.running) return;
+  const c = ensureCtx();
+  if (!sync){
+    stopMelody();
+    const t0 = c.currentTime + 0.15;
+    playSong(t0, 0);
+    sync = {t0, taps: []};
+    $('songSync').textContent = 'Toca aquí en cada pulso';
+    $('songSyncDone').hidden = false;
+    return;
+  }
+  const lat = (c.outputLatency || 0) + (c.baseLatency || 0);
+  sync.taps.push(c.currentTime - sync.t0 - lat);
+  $('songSync').textContent = 'Toca en cada pulso (' + sync.taps.length + ')';
 }
 function askName(def){
   const n = prompt('Nombre de la partitura', def);
@@ -458,6 +604,7 @@ function store(){
       const base = L.example !== null && PRESETS[L.example] ? PRESETS[L.example][0] + ' (mi versión)' : 'Partitura sin título';
       it = {id:newId(), name:uniqueName(base)};
       L.items.push(it); L.active = it.id; L.example = null;
+      if (SONG.blob && !SONG.forId){ SONG.forId = it.id; songPut(it.id, SONG.blob, SONG.name); }
     }
   }
   if (it) snapshot(it);
@@ -530,7 +677,7 @@ function applyScore(keepSel){
   if (keepSel !== true || E.sel >= notes.length) E.sel = -1;
   syncTools(); drawEditor(); updateSel();
 }
-function stopMetro(){ if (S.metroGain){ try{ S.metroGain.disconnect(); }catch(e){} S.metroGain = null; } }
+function stopMetro(){ if (S.metroGain){ try{ S.metroGain.disconnect(); }catch(e){} S.metroGain = null; } stopSong(S.running); S.songOn = false; }
 function reset(){
   stopMetro();
   S.cur = 0; S.anim = 0; S.hold = 0; S.devs = []; S.results = []; S.needRelease = false;
@@ -548,7 +695,7 @@ function setMode(m){
   document.querySelectorAll('.onlyRhythm').forEach(e => e.hidden = m !== 'rhythm');
   $('intro').textContent = m === 'wait'
     ? 'Canta la nota marcada en naranja. Cuando la mantienes afinada, la partitura avanza a la siguiente.'
-    : 'Tras un compás de entrada, la partitura avanza al tempo elegido. Canta cada nota cuando llegue a la franja naranja y al final verás cuáles alcanzaste.';
+    : 'La partitura avanza al tempo elegido, con un compás de entrada o con la canción que elijas en «Partitura y ajustes». Canta cada nota cuando llegue a la franja naranja y verás cuáles alcanzas.';
   reset(); store();
 }
 
@@ -822,18 +969,29 @@ function startRhythm(){
   const lead = 0.25;
   const lat = (c.outputLatency || 0) + (c.baseLatency || 0);
   const ctxStart = c.currentTime + lead;
-  S.tBeat0 = performance.now() + (lead + lat)*1000 + S.countBeats*S.beatMs;
   S.metroGain = c.createGain(); S.metroGain.connect(c.destination);
-  const totalClicks = S.countBeats + Math.ceil(S.total);
-  for (let k=0; k<totalClicks; k++){
-    if (k >= S.countBeats && !$('metro').checked) break;
-    click(S.metroGain, ctxStart + k*S.beatMs/1000, k % bpb === 0);
+  S.songOn = !!SONG.buffer;
+  if (S.songOn){
+    // La canción marca el tiempo: la partitura empieza cuando suena el segundo indicado
+    syncStop(false);
+    const off = Math.max(0, +$('songOffset').value || 0);
+    S.countBeats = off*1000/S.beatMs;
+    S.tBeat0 = performance.now() + (lead + lat + off)*1000;
+    playSong(ctxStart, 0);
+  } else {
+    S.tBeat0 = performance.now() + (lead + lat)*1000 + S.countBeats*S.beatMs;
+    const totalClicks = S.countBeats + Math.ceil(S.total);
+    for (let k=0; k<totalClicks; k++){
+      if (k >= S.countBeats && !$('metro').checked) break;
+      click(S.metroGain, ctxStart + k*S.beatMs/1000, k % bpb === 0);
+    }
   }
   S.acc = S.notes.map(() => ({total:0, voiced:0, ok:0, cents:[], firstOk:-1}));
   S.nextFinal = 0; S.running = true; S.t0 = performance.now();
   updateButtons(); updateTarget();
 }
 function nearClick(now){
+  if (S.songOn) return false;
   const b0 = S.tBeat0 - S.countBeats*S.beatMs;
   const k = Math.round((now - b0)/S.beatMs);
   if (k < 0) return false;
@@ -1652,6 +1810,17 @@ $('btnSkip').addEventListener('click', () => {
   advanceWait(performance.now(), true);
 });
 $('btnReset').addEventListener('click', reset);
+$('songPick').addEventListener('click', () => $('songFile').click());
+$('songFile').addEventListener('change', e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  setSongBlob(f, f.name.replace(/\.[^.]+$/, ''), L.active, !!L.active);
+});
+$('songClear').addEventListener('click', () => { if (SONG.forId) songDel(SONG.forId); clearSong(); });
+$('songVol').addEventListener('input', () => { if (SONG.gain) SONG.gain.gain.value = +$('songVol').value; });
+$('songOffset').addEventListener('change', () => { store(); if (S.mode === 'rhythm') reset(); });
+$('songSync').addEventListener('pointerdown', e => { e.preventDefault(); syncTap(); });
+$('songSync').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); syncTap(); } });
+$('songSyncDone').addEventListener('click', () => syncStop(true));
 $('libSel').addEventListener('change', e => {
   const v = e.target.value;
   if (v.startsWith('ex:')) { loadExample(+v.slice(3)); return; }
@@ -1669,6 +1838,7 @@ $('libSaveAs').addEventListener('click', () => {
   const name = askName(uniqueName(base)); if (!name) return;
   const it = {id:newId(), name}; snapshot(it);
   L.items.push(it); L.active = it.id; L.example = null; saveLib(); refreshLib();
+  if (SONG.blob){ SONG.forId = it.id; songPut(it.id, SONG.blob, SONG.name); songUI(); }
 });
 $('libRename').addEventListener('click', () => {
   const it = activeItem(); if (!it) return;
@@ -1678,6 +1848,7 @@ $('libRename').addEventListener('click', () => {
 $('libDel').addEventListener('click', () => {
   const it = activeItem();
   if (!it || !confirm('¿Eliminar «' + it.name + '» de Mis partituras?')) return;
+  songDel(it.id);
   L.items = L.items.filter(x => x !== it); L.active = null; saveLib();
   const next = [...L.items].sort((a,b) => a.name.localeCompare(b.name, 'es'))[0];
   if (next) openItem(next); else loadExample(0);
@@ -1691,24 +1862,130 @@ $('libExport').addEventListener('click', () => {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 });
 $('libImport').addEventListener('click', () => $('libFile').click());
+function importLibraryText(text){
+  const bad = 'Ese archivo no es una copia de partituras de Para Alicia.';
+  let d; try{ d = JSON.parse(text); }catch(_){ return bad; }
+  const list = Array.isArray(d) ? d : (d && d.partituras);
+  if (!Array.isArray(list)) return bad;
+  let added = 0, same = 0;
+  list.forEach(x => {
+    if (!x || typeof x.score !== 'string') return;
+    if (L.items.some(y => y.name === x.name && y.score === x.score && (y.lyrics || '') === (x.lyrics || ''))){ same++; return; }
+    L.items.push({id:newId(), name:String(x.name || 'Partitura importada').slice(0,80), score:x.score,
+      lyrics: typeof x.lyrics === 'string' ? x.lyrics : '', bpm: x.bpm || '80', meter: x.meter || '4', updated: Date.now()});
+    added++;
+  });
+  saveLib(); refreshLib();
+  return added ? (added === 1 ? 'Se ha añadido 1 partitura' : 'Se han añadido ' + added + ' partituras') + (same ? '; ' + same + ' ya estaban.' : '.') : 'No había partituras nuevas en el archivo.';
+}
 $('libFile').addEventListener('change', async e => {
-  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
-  try{
-    const d = JSON.parse(await f.text());
-    const list = Array.isArray(d) ? d : d.partituras;
-    if (!Array.isArray(list)) throw new Error('formato');
-    let added = 0, same = 0;
-    list.forEach(x => {
-      if (!x || typeof x.score !== 'string') return;
-      if (L.items.some(y => y.name === x.name && y.score === x.score && (y.lyrics || '') === (x.lyrics || ''))){ same++; return; }
-      L.items.push({id:newId(), name:String(x.name || 'Partitura importada').slice(0,80), score:x.score,
-        lyrics: typeof x.lyrics === 'string' ? x.lyrics : '', bpm: x.bpm || '80', meter: x.meter || '4', updated: Date.now()});
-      added++;
-    });
-    saveLib(); refreshLib();
-    alert(added ? 'Se han añadido ' + added + (added === 1 ? ' partitura' : ' partituras') + (same ? '; ' + same + ' ya estaban.' : '.') : 'No había partituras nuevas en el archivo.');
-  }catch(_){ alert('Ese archivo no es una copia de partituras de Para Alicia.'); }
+  const files = [...e.target.files]; e.target.value = ''; if (!files.length) return;
+  const msgs = [];
+  for (const f of files) msgs.push((files.length > 1 ? f.name + ': ' : '') + importLibraryText(await f.text()));
+  alert(msgs.join('\n'));
 });
+
+/* ---------- Google Drive ---------- */
+// Para activar «Importar de Google Drive», rellena estos tres datos de tu proyecto de Google Cloud.
+// Si se quedan vacíos, el botón no aparece y la app no se conecta a Google.
+const GDRIVE = {
+  clientId: '',   // ID de cliente de OAuth, termina en .apps.googleusercontent.com
+  apiKey: '',     // Clave de API, empieza por AIza
+  appId: ''       // Número del proyecto (solo cifras)
+};
+const driveReady = () => !!(GDRIVE.clientId && GDRIVE.apiKey && GDRIVE.appId);
+function loadScript(src){
+  return new Promise((ok, ko) => {
+    const prev = document.querySelector('script[src="' + src + '"]');
+    if (prev){ if (prev.dataset.loaded) ok(); else { prev.addEventListener('load', () => ok()); prev.addEventListener('error', ko); } return; }
+    const sc = document.createElement('script'); sc.src = src; sc.async = true;
+    sc.onload = () => { sc.dataset.loaded = '1'; ok(); };
+    sc.onerror = () => ko(new Error('sin conexión con Google'));
+    document.head.appendChild(sc);
+  });
+}
+let driveToken = null, driveTokenExp = 0, driveLoading = null;
+function driveInit(){
+  if (!driveLoading){
+    driveLoading = Promise.all([loadScript('https://apis.google.com/js/api.js'), loadScript('https://accounts.google.com/gsi/client')])
+      .then(() => new Promise(r => gapi.load('picker', r)))
+      .catch(err => { driveLoading = null; throw err; });
+  }
+  return driveLoading;
+}
+const driveLoaded = () => !!(window.google && google.accounts && google.accounts.oauth2 && google.picker);
+function driveToken_(){
+  return new Promise((ok, ko) => {
+    const tc = google.accounts.oauth2.initTokenClient({
+      client_id: GDRIVE.clientId,
+      scope: 'https://www.googleapis.com/auth/drive.file',
+      callback: r => {
+        if (r.error) return ko(new Error(r.error));
+        driveToken = r.access_token; driveTokenExp = Date.now() + (r.expires_in || 3600)*1000; ok(driveToken);
+      },
+      error_callback: e => ko(new Error(e && e.type === 'popup_closed' ? 'ventana cerrada' : (e && e.type) || 'cancelado'))
+    });
+    tc.requestAccessToken({prompt: 'select_account'});   // permite elegir cualquier cuenta de Google cada vez
+  });
+}
+$('libDrive').addEventListener('click', async () => {
+  if (!driveLoaded()){
+    alert('Conectando con Google Drive… Vuelve a pulsar en unos segundos.');
+    driveInit().catch(() => alert('No se ha podido conectar con Google. Comprueba la conexión a internet.'));
+    return;
+  }
+  let token;
+  try{ token = await driveToken_(); }
+  catch(err){ alert('No se ha podido entrar en Google Drive (' + err.message + ').'); return; }
+  const P = google.picker;
+  const mt = 'application/json,text/plain,application/octet-stream';
+  const mk = () => new P.DocsView(P.ViewId.DOCS).setMimeTypes(mt).setMode(P.DocsViewMode.LIST);
+  new P.PickerBuilder()
+    .addView(mk().setOwnedByMe(true))
+    .addView(mk().setOwnedByMe(false))
+    .addView(mk().setEnableDrives(true))
+    .enableFeature(P.Feature.MULTISELECT_ENABLED)
+    .enableFeature(P.Feature.SUPPORT_DRIVES)
+    .setOAuthToken(token).setDeveloperKey(GDRIVE.apiKey).setAppId(GDRIVE.appId)
+    .setLocale('es').setTitle('Elige una copia de partituras')
+    .setCallback(async data => {
+      if (data[P.Response.ACTION] !== P.Action.PICKED) return;
+      const docs = data[P.Response.DOCUMENTS] || [], msgs = [];
+      for (const doc of docs){
+        const name = doc[P.Document.NAME];
+        try{
+          const r = await fetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(doc[P.Document.ID]) + '?alt=media&supportsAllDrives=true',
+            {headers: {Authorization: 'Bearer ' + token}});
+          if (!r.ok) throw new Error(r.status);
+          msgs.push((docs.length > 1 ? name + ': ' : '') + importLibraryText(await r.text()));
+        }catch(_){ msgs.push('No se ha podido leer «' + name + '» de Drive.'); }
+      }
+      alert(msgs.join('\n'));
+    })
+    .build().setVisible(true);
+});
+if (driveReady()){ $('libDrive').hidden = false; driveInit().catch(() => {}); }
+// Archivos compartidos como «Cualquier persona con el enlace», de cualquier cuenta y sin iniciar sesión
+function driveIdFrom(text){
+  const t = (text || '').trim();
+  const m = t.match(/\/d\/([\w-]{20,})/) || t.match(/[?&]id=([\w-]{20,})/) || t.match(/^([\w-]{20,})$/);
+  return m ? m[1] : null;
+}
+if (GDRIVE.apiKey){
+  $('libDriveLink').hidden = false;
+  $('libDriveLink').addEventListener('click', async () => {
+    const link = prompt('Pega el enlace del archivo de Drive. Debe estar compartido como «Cualquier persona con el enlace».');
+    if (link === null) return;
+    const id = driveIdFrom(link);
+    if (!id){ alert('No reconozco ese enlace de Google Drive.'); return; }
+    try{
+      const r = await fetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) + '?alt=media&supportsAllDrives=true&key=' + encodeURIComponent(GDRIVE.apiKey));
+      if (r.status === 403 || r.status === 404){ alert('No se puede abrir ese archivo. En Drive, compártelo como «Cualquier persona con el enlace» y vuelve a probar.'); return; }
+      if (!r.ok) throw new Error(r.status);
+      alert(importLibraryText(await r.text()));
+    }catch(_){ alert('No se ha podido descargar el archivo de Drive. Comprueba la conexión a internet.'); }
+  });
+}
 // Deslizar el pentagrama cuando no se está practicando
 let drag = null;
 cv.addEventListener('pointerdown', e => { if (S.running || S.melody) return; drag = {x: e.clientX, pan: S.pan, moved: false, id: e.pointerId}; });
@@ -1751,6 +2028,8 @@ $('instr').addEventListener('change', () => {
 const had = load();
 if (!had) $('score').value = PRESETS[0][1];
 loadLib();
+songUI();
+if (L.active) loadSongFor(L.active);
 { S.syl = parseLyrics($('lyrics').value); const {notes} = parseScore($('score').value); S.source = notes; buildNotes(); }
 setMode(S.mode);
 edInit();
