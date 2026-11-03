@@ -269,6 +269,7 @@ footer a{color:inherit}
         <div class="tgroup" id="accTools"></div>
         <div class="tgroup">
           <button id="eRest">Silencio</button>
+          <button id="eTie" title="Ligadura de prolongación con la nota siguiente">Ligadura</button>
           <button id="eGrace" aria-pressed="false" title="Nota de adorno (apoyatura) de la nota siguiente">Adorno</button>
           <button id="eUp" aria-label="Subir la nota seleccionada">↑</button>
           <button id="eDown" aria-label="Bajar la nota seleccionada">↓</button>
@@ -282,12 +283,12 @@ footer a{color:inherit}
       <label class="f" id="sylBox" hidden>Sílaba de la nota seleccionada (pulsa Intro para pasar a la siguiente nota)
         <input type="text" id="eSyl" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Por ejemplo: tre- (con guion si la palabra sigue)" enterkeyhint="next">
       </label>
-      <p class="hint">Elige una figura y toca el pentagrama a la altura de la nota: se añade al final, o entre dos notas si tocas entre ellas. Toca una nota para seleccionarla; entonces puedes cambiarle la figura, el puntillo o la alteración, moverla con las flechas o tocando otra altura en su misma columna, convertirla en silencio o borrarla. Para ponerle un adorno, selecciona la nota principal y pulsa Adorno: aparece delante y lo subes o bajas con las flechas. Con teclado: flechas para mover y cambiar de nota, Supr para borrar.</p>
+      <p class="hint">Elige una figura y toca el pentagrama a la altura de la nota: se añade al final, o entre dos notas si tocas entre ellas. Toca una nota para seleccionarla; entonces puedes cambiarle la figura, el puntillo o la alteración, moverla con las flechas o tocando otra altura en su misma columna, convertirla en silencio o borrarla. Para ponerle un adorno, selecciona la nota principal y pulsa Adorno: aparece delante y lo subes o bajas con las flechas. Para ligar dos notas iguales, selecciona la primera y pulsa Ligadura. Con teclado: flechas para mover y cambiar de nota, Supr para borrar.</p>
     </div>
     <label class="f" style="margin-top:12px">Notas de la partitura (se actualizan solas al usar el pentagrama)
       <textarea id="score" spellcheck="false"></textarea>
     </label>
-    <p class="hint">Escribe las notas separadas por espacios: Do4 Re4 Mi♭4 Fa#4… (también C4 D4 Eb4). Do4 es el do central; sin octava se usa la 4. Para la duración añade dos puntos y el número de pulsos: Sol4:2 es una blanca, Re4:0.5 una corchea, Mi4:1.5 una negra con puntillo; sin duración, cada nota es una negra. Un guion es un silencio (-:2 dura dos pulsos). Una nota entre paréntesis es una nota de adorno (apoyatura) de la nota siguiente: (Re4) Do4. Las barras | se ignoran.</p>
+    <p class="hint">Escribe las notas separadas por espacios: Do4 Re4 Mi♭4 Fa#4… (también C4 D4 Eb4). Do4 es el do central; sin octava se usa la 4. Para la duración añade dos puntos y el número de pulsos: Sol4:2 es una blanca, Re4:0.5 una corchea, Mi4:1.5 una negra con puntillo; sin duración, cada nota es una negra. Un guion es un silencio (-:2 dura dos pulsos). Una nota entre paréntesis es una nota de adorno (apoyatura) de la nota siguiente: (Re4) Do4. Una tilde ~ al final liga la nota con la siguiente, que debe ser igual: La4:0.5~ La4:2 se canta como una sola nota de dos pulsos y medio. Las barras | se ignoran.</p>
     <p class="hint" id="parseErr"></p>
     <label class="f" style="margin-top:12px">Letra de la canción
       <textarea id="lyrics" spellcheck="false" placeholder="Freu-de, schö-ner Göt-ter-fun-ken…"></textarea>
@@ -337,7 +338,7 @@ function parseDur(s){
 }
 function parseScore(text){
   const tokens = text.replace(/[|;]/g,' ').split(/\s+/).map(t => t.replace(/,+$/,'')).filter(Boolean);
-  const reN = /^(do|re|mi|fa|sol|la|si|[a-g])(##|#|♯|bb|b|♭)?(-?\d)?(?::([\d.,\/]+))?$/i;
+  const reN = /^(do|re|mi|fa|sol|la|si|[a-g])(##|#|♯|bb|b|♭)?(-?\d)?(?::([\d.,\/]+))?(~)?$/i;
   const reR = /^(-|_|sil|silencio)(?::([\d.,\/]+))?$/i;
   const notes = [], bad = [];
   for (const t0 of tokens){
@@ -361,6 +362,7 @@ function parseScore(text){
     if (midi < 33 || midi > 96 || isNaN(dur)){ bad.push(t); continue; }
     const note = {midi, step: oct*7+li, acc, dur: grace ? 0 : dur, label: LETNAME[li]+ACCSTR[acc]+oct};
     if (grace) note.grace = true;
+    if (m[5] && !grace) note.tie = true;
     notes.push(note);
   }
   return {notes, bad};
@@ -636,11 +638,16 @@ function load(){
 function buildNotes(){
   let start = 0;
   S.notes = S.source.map(n => {
-    const o = n.rest ? {...n} : (S.transpose ? {...spell(n.midi + S.transpose), dur:n.dur, grace:n.grace} : {...n});
+    const o = n.rest ? {...n} : (S.transpose ? {...spell(n.midi + S.transpose), dur:n.dur, grace:n.grace, tie:n.tie} : {...n});
     o.start = start; start += o.dur; return o;
   });
   S.total = start;
-  S.playable = S.notes.filter(n => !n.rest && !n.grace).length;
+  S.notes.forEach((n,i) => { delete n.cont; n.tdur = n.dur; n.head = i; });
+  for (let i = S.notes.length - 2; i >= 0; i--){
+    if (contAt(S.notes, i+1)){ S.notes[i+1].cont = true; S.notes[i].tdur = S.notes[i].dur + S.notes[i+1].tdur; }
+  }
+  S.notes.forEach((n,i) => { if (n.cont) n.head = S.notes[i-1].head; });
+  S.playable = S.notes.filter(n => !n.rest && !n.grace && !n.cont).length;
   attachLyrics();
   $('tVal').textContent = (S.transpose>0?'+':'') + S.transpose;
 }
@@ -660,8 +667,19 @@ function serializeLyrics(arr){
   a.forEach(x => { out += (x.t ? x.t.replace(/ /g,'~') : '_') + (x.t && x.h ? '-' : ' '); });
   return out.trim();
 }
+function pitchOf(n){
+  if (n.step === undefined) return n.midi;
+  const o = Math.floor(n.step/7), li = ((n.step % 7) + 7) % 7;
+  return (o+1)*12 + NAT[li] + (n.acc || 0);
+}
+// ¿La nota j es la continuación de una ligadura de prolongación?
+function contAt(arr, j){
+  const a = arr[j-1], b = arr[j];
+  return !!(a && b && a.tie && !a.rest && !a.grace && !b.rest && !b.grace && pitchOf(a) === pitchOf(b));
+}
+const sylNote = (arr, j) => !arr[j].rest && !arr[j].grace && !contAt(arr, j);
 function attachLyrics(){
-  for (const arr of [S.notes, S.source]){ let k = 0; arr.forEach(n => { if (!n.rest && !n.grace){ n.syl = S.syl[k] || null; k++; } else n.syl = null; }); }
+  for (const arr of [S.notes, S.source]){ let k = 0; arr.forEach((n,j) => { if (sylNote(arr, j)){ n.syl = S.syl[k] || null; k++; } else n.syl = null; }); }
   const li = $('lyrInfo');
   if (li) li.textContent = S.syl.length
     ? S.syl.length + (S.syl.length === 1 ? ' sílaba' : ' sílabas') + ' para ' + S.playable + ' notas' + (S.syl.length > S.playable ? '; las que sobran no se muestran.' : '.')
@@ -943,7 +961,7 @@ const bpm = () => Math.max(40, Math.min(200, +$('bpm').value || 80));
 const samePitch = (a,b) => anyOct() ? ((a-b)%12+12)%12 === 0 : a === b;
 function centsVs(m, n){ return (anyOct() ? wrap(m - n.midi) : m - n.midi) * 100; }
 
-function skipRests(){ while (S.notes[S.cur] && (S.notes[S.cur].rest || S.notes[S.cur].grace)) S.cur++; }
+function skipRests(){ while (S.notes[S.cur] && (S.notes[S.cur].rest || S.notes[S.cur].grace || S.notes[S.cur].cont)) S.cur++; }
 function advanceWait(now, skipped){
   const n = S.notes[S.cur];
   const avg = S.devs.length ? S.devs.reduce((a,b)=>a+b,0)/S.devs.length : 0;
@@ -999,7 +1017,7 @@ function nearClick(now){
   return Math.abs(now - (b0 + k*S.beatMs)) < 45;
 }
 function finalizeRhythm(i){
-  const n = S.notes[i]; if (n.rest || n.grace) return;
+  const n = S.notes[i]; if (n.rest || n.grace || n.cont) return;
   const a = S.acc[i];
   if (!a.total){ S.results[i] = {status:'miss', ratio:0, detail:'Sin datos'}; return; }
   const ratio = a.ok/a.total, voiced = a.voiced/a.total;
@@ -1020,7 +1038,7 @@ function finish(now){
   const list = $('sList'); list.innerHTML = '';
   let ok = 0, part = 0, miss = 0, k = 0, ratios = [];
   S.notes.forEach((n,i) => {
-    if (n.rest || n.grace) return;
+    if (n.rest || n.grace || n.cont) return;
     k++;
     const r = S.results[i] || {status:'miss', detail:'Sin cantar'};
     if (r.status === 'ok') ok++; else if (r.status === 'partial') part++; else miss++;
@@ -1064,7 +1082,7 @@ function rhythmCounts(){
   S.results.forEach(r => { if (r){ done++; if (r.status === 'ok') ok++; } });
   return {ok, done};
 }
-function playableIndex(i){ let k = 0; for (let j=0;j<=i && j<S.notes.length;j++) if (!S.notes[j].rest && !S.notes[j].grace) k++; return k; }
+function playableIndex(i){ let k = 0; for (let j=0;j<=i && j<S.notes.length;j++) if (!S.notes[j].rest && !S.notes[j].grace && !S.notes[j].cont) k++; return k; }
 function updateTarget(){
   S.shownCur = S.cur;
   const n = S.notes[S.cur];
@@ -1092,6 +1110,7 @@ function frame(now){
     let idx = -1;
     for (let i=0;i<S.notes.length;i++){ const n = S.notes[i]; if (S.beat >= n.start && S.beat < n.start + n.dur){ idx = i; break; } }
     S.cur = idx >= 0 ? idx : (S.beat < 0 ? S.notes.findIndex(n => !n.rest && !n.grace) : S.cur);
+    while (S.cur > 0 && S.notes[S.cur] && S.notes[S.cur].cont) S.cur--;
   }
 
   let detected = false;
@@ -1127,7 +1146,8 @@ function frame(now){
   if (rhythmOn){
     const i = S.cur, n = S.notes[i];
     if (detected && n && !n.rest && S.beat >= 0){
-      const ws = n.start + Math.min(0.25, 0.2*n.dur), we = n.start + n.dur - 0.05;
+      const td = n.tdur || n.dur;
+      const ws = n.start + Math.min(0.25, 0.2*td), we = n.start + td - 0.05;
       if (S.beat >= ws && S.beat < we){
         const a = S.acc[i]; a.total++;
         if (sung !== null){
@@ -1137,7 +1157,7 @@ function frame(now){
       }
     }
     let changed = false;
-    while (S.nextFinal < S.notes.length && S.beat >= S.notes[S.nextFinal].start + S.notes[S.nextFinal].dur){
+    while (S.nextFinal < S.notes.length && S.beat >= S.notes[S.nextFinal].start + (S.notes[S.nextFinal].tdur || S.notes[S.nextFinal].dur)){
       finalizeRhythm(S.nextFinal); S.nextFinal++; changed = true;
     }
     if (changed || S.cur !== S.shownCur) updateTarget();
@@ -1296,7 +1316,7 @@ function draw(now){
     const n = notes[i], x = xOf(i);
     const xEnd = rhythm ? px + (n.start + n.dur - vb)*ppb - shift : x;
     if (xEnd < 50 || x > W + 30) continue;
-    const res = S.results[i];
+    const res = S.results[n.cont ? n.head : i];
     const current = i === S.cur && (S.running || S.mode === 'wait') && !S.finished;
     const playing = i === S.playIdx;
     let col = res ? statusColor(res.status) : (current || playing ? colors.orange : colors.ink);
@@ -1401,10 +1421,24 @@ function draw(now){
       const x0 = j >= 0 ? xOf(j) + 16 : x - 20;
       g.strokeStyle = res ? col : colors.ink; g.lineWidth = 1.2;
       g.beginPath(); g.moveTo(x0, H - 14); g.lineTo(x + 10, H - 14); g.stroke();
+    } else if (n.cont && notes[n.head] && notes[n.head].syl && notes[n.head].syl.t){
+      g.strokeStyle = res ? col : colors.ink; g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(xOf(i-1) + 16, H - 14); g.lineTo(x + 10, H - 14); g.stroke();
     }
     g.globalAlpha = 1;
   }
 
+  // Ligaduras de prolongación
+  for (let i = 0; i < notes.length - 1; i++){
+    if (!notes[i+1].cont) continue;
+    const a = notes[i], x1 = xOf(i), x2 = xOf(i+1);
+    if (x2 < 50 || x1 > W + 30) continue;
+    const y = Y(a.step), up = a.step < clef.center, d = up ? 1 : -1;
+    const r = S.results[a.head];
+    g.strokeStyle = r ? statusColor(r.status) : colors.ink; g.lineWidth = 1.6;
+    g.beginPath(); g.moveTo(x1 + half*0.9, y + d*half*1.1);
+    g.quadraticCurveTo((x1 + x2)/2, y + d*half*2.8, x2 - half*0.9, y + d*half*1.1); g.stroke();
+  }
   // Rastro de la voz
   const speed = rhythm ? ppb/S.beatMs : 0.075;
   const clampS = s => Math.max(clef.center-15, Math.min(clef.center+15, s));
@@ -1451,7 +1485,15 @@ const FIG = [[4,'Redonda','𝅝'],[2,'Blanca','𝅗𝅥'],[1,'Negra','𝅘𝅥']
 const RESTG = {4:'𝄻',2:'𝄼',1:'𝄽',0.5:'𝄾',0.25:'𝄿'};
 const ACCT = [[0,'♮','Sin alteración'],[1,'♯','Sostenido'],[-1,'♭','Bemol']];
 const E = {sel:-1, base:1, dot:false, acc:0, grace:false, layout:[], sylFor:-1};
-const pitchedBefore = (ns, i) => ns.slice(0, i).filter(m => !m.rest && !m.grace).length;
+const pitchedBefore = (ns, i) => { let k = 0; for (let j = 0; j < i && j < ns.length; j++) if (sylNote(ns, j)) k++; return k; };
+// Ajusta la letra cuando una nota pasa a ser (o deja de ser) continuación de una ligadura
+function reconcileTies(before, ns){
+  for (let j = 0; j < ns.length; j++){
+    const a = !!before[j], b = contAt(ns, j);
+    if (a && !b) lyricInsert(pitchedBefore(ns, j)); else if (!a && b) lyricRemove(pitchedBefore(ns, j));
+  }
+}
+const contFlags = ns => ns.map((_, j) => contAt(ns, j));
 function setDur(ns, i){ const m = ns[i]; if (m.grace){ delete m.grace; lyricInsert(pitchedBefore(ns, i)); } m.dur = eDur(); }
 function lyricInsert(pi){ if (pi < S.syl.length){ S.syl.splice(pi, 0, {t:'', h:false}); writeLyrics(); } }
 function lyricRemove(pi){ if (pi < S.syl.length){ S.syl.splice(pi, 1); writeLyrics(); } }
@@ -1476,7 +1518,7 @@ function serialize(notes){
     else {
       const o = Math.floor(n.step/7), li = ((n.step%7)+7)%7;
       const nm = LETNAME[li] + ({1:'#',2:'##','-1':'b','-2':'bb'}[n.acc] || '') + o;
-      out.push(n.grace ? '(' + nm + ')' : nm + d);
+      out.push(n.grace ? '(' + nm + ')' : nm + d + (n.tie ? '~' : ''));
     }
     beats += n.dur;
     if (n.dur > 0 && i < notes.length-1 && Math.abs(beats/bpb - Math.round(beats/bpb)) < 1e-6) out.push('|');
@@ -1506,7 +1548,7 @@ function updateSel(){
   $('eSel').textContent = n
     ? 'Seleccionada: nota ' + (E.sel+1) + ', ' + (n.rest ? 'silencio de ' + figName(n.dur) : n.label + ', ' + (n.grace ? 'nota de adorno' : figName(n.dur))) + '.'
     : (E.grace ? 'Modo adorno: las notas que toques serán notas de adorno de la nota siguiente.' : 'Figura elegida: ' + figName(eDur()) + '. Toca el pentagrama para añadir notas.');
-  const isP = !!(n && !n.rest && !n.grace);
+  const isP = !!(n && !n.rest && !n.grace && !contAt(S.source, E.sel));
   $('sylBox').hidden = !isP;
   if (isP && E.sylFor !== E.sel){
     const sy = S.syl[pitchedBefore(S.source, E.sel)];
@@ -1625,8 +1667,19 @@ function drawEditor(){
       const x0 = j >= 0 ? E.layout[j].x + 14 : nx - 18;
       c.strokeStyle = sel ? colors.orange : colors.ink; c.lineWidth = 1.2;
       c.beginPath(); c.moveTo(x0, H - 14); c.lineTo(nx + 8, H - 14); c.stroke();
+    } else if (contAt(notes, i) && notes[i-1].syl && notes[i-1].syl.t){
+      c.strokeStyle = sel ? colors.orange : colors.ink; c.lineWidth = 1.2;
+      c.beginPath(); c.moveTo(E.layout[i-1].x + 14, H - 14); c.lineTo(nx + 8, H - 14); c.stroke();
     }
   });
+  for (let i = 0; i < notes.length - 1; i++){
+    if (!contAt(notes, i+1)) continue;
+    const a = notes[i], x1 = E.layout[i].x, x2 = E.layout[i+1].x;
+    const y = Y(a.step), d = a.step < clef.center ? 1 : -1;
+    c.strokeStyle = (i === E.sel || i+1 === E.sel) ? colors.orange : colors.ink; c.lineWidth = 1.5;
+    c.beginPath(); c.moveTo(x1 + half, y + d*half*1.1);
+    c.quadraticCurveTo((x1 + x2)/2, y + d*half*2.8, x2 - half, y + d*half*1.1); c.stroke();
+  }
   c.fillStyle = colors.muted; c.globalAlpha = 0.55;
   c.font = '300 30px Inter, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
   c.fillText('+', endX + 38, cy);
@@ -1655,7 +1708,7 @@ function edInit(){
     b.addEventListener('click', () => {
       E.acc = v;
       const n = S.source[E.sel];
-      if (n && !n.rest){ const ns = copyNotes(); ns[E.sel].acc = v; commit(ns, E.sel); soundStep(ns[E.sel]); }
+      if (n && !n.rest){ const ns = copyNotes(), before = contFlags(ns); ns[E.sel].acc = v; reconcileTies(before, ns); commit(ns, E.sel); soundStep(ns[E.sel]); }
       else syncTools();
     });
     $('accTools').appendChild(b);
@@ -1678,6 +1731,16 @@ function edInit(){
     }
     E.grace = !E.grace; syncTools(); updateSel();
   });
+  $('eTie').addEventListener('click', () => {
+    const ns = copyNotes(), i = E.sel, n = ns[i];
+    if (!n || n.rest || n.grace){ alert('Selecciona la primera de las dos notas que quieres ligar.'); return; }
+    const before = contFlags(ns);
+    if (n.tie){ delete n.tie; reconcileTies(before, ns); commit(ns, i); return; }
+    const nx = ns[i+1];
+    if (!nx || nx.rest || nx.grace){ alert('Detrás de esta nota no hay otra nota a la que ligarla. Escribe primero la segunda nota, a la misma altura.'); return; }
+    if (pitchOf(nx) !== pitchOf(n)){ alert('La ligadura de prolongación une dos notas iguales. Pon la nota siguiente a la misma altura (con las flechas) y vuelve a pulsar Ligadura.'); return; }
+    n.tie = true; reconcileTies(before, ns); commit(ns, i);
+  });
   $('eRest').addEventListener('click', () => {
     const ns = copyNotes(), n = ns[E.sel];
     if (n){
@@ -1691,7 +1754,9 @@ function edInit(){
     const ns = copyNotes(), n = ns[E.sel];
     if (!n || n.rest) return;
     const cl = edClef();
+    const before = contFlags(ns);
     n.step = Math.max(cl.center-12, Math.min(cl.center+12, n.step + d));
+    reconcileTies(before, ns);
     commit(ns, E.sel); soundStep(n);
   };
   $('eUp').addEventListener('click', () => move(1));
@@ -1742,7 +1807,7 @@ function edInit(){
     else if (k === 'Escape'){ E.sel = -1; syncTools(); drawEditor(); updateSel(); }
   });
   $('eSyl').addEventListener('input', () => {
-    const n = S.source[E.sel]; if (!n || n.rest || n.grace) return;
+    const n = S.source[E.sel]; if (!n || n.rest || n.grace || contAt(S.source, E.sel)) return;
     const pi = pitchedBefore(S.source, E.sel);
     while (S.syl.length <= pi) S.syl.push({t:'', h:false});
     const v = $('eSyl').value;
@@ -1753,7 +1818,7 @@ function edInit(){
   $('eSyl').addEventListener('keydown', e => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
-    let i = E.sel + 1; while (S.source[i] && (S.source[i].rest || S.source[i].grace)) i++;
+    let i = E.sel + 1; while (S.source[i] && !sylNote(S.source, i)) i++;
     if (!S.source[i]) return;
     E.sel = i; syncTools(); drawEditor(); updateSel(); $('eSyl').select(); soundStep(S.source[i]);
     const L = E.layout[i], b = $('escroll');
@@ -1808,7 +1873,8 @@ $('btnMelody').addEventListener('click', () => {
   S.notes.forEach((n,i) => {
     if (n.rest) return;
     if (n.grace){ playTone(n.midi, 0.1, Math.max(0, lead + n.start*sec - 0.1), S.melGain); return; }
-    playTone(n.midi, Math.max(0.12, n.dur*sec*0.9), lead + n.start*sec, S.melGain);
+    if (n.cont) return;
+    playTone(n.midi, Math.max(0.12, (n.tdur || n.dur)*sec*0.9), lead + n.start*sec, S.melGain);
     melodyTimers.push(setTimeout(() => { S.playIdx = i; }, (lead + lat + n.start*sec)*1000 + 20));
   });
   melodyTimers.push(setTimeout(stopMelody, (lead + lat + S.total*sec)*1000 + 250));
