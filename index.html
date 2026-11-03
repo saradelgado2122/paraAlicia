@@ -244,12 +244,34 @@ footer a{color:inherit}
       <label class="f">Tempo (negras por minuto)
         <input type="number" id="bpm" min="40" max="200" step="1" value="80">
       </label>
+      <label class="f">Armadura
+        <select id="keySig">
+          <option value="0">Sin alteraciones (Do mayor / La menor)</option>
+          <option value="1">1 ♯ (Sol mayor / Mi menor)</option>
+          <option value="2">2 ♯ (Re mayor / Si menor)</option>
+          <option value="3">3 ♯ (La mayor / Fa♯ menor)</option>
+          <option value="4">4 ♯ (Mi mayor / Do♯ menor)</option>
+          <option value="5">5 ♯ (Si mayor / Sol♯ menor)</option>
+          <option value="6">6 ♯ (Fa♯ mayor / Re♯ menor)</option>
+          <option value="7">7 ♯ (Do♯ mayor / La♯ menor)</option>
+          <option value="-1">1 ♭ (Fa mayor / Re menor)</option>
+          <option value="-2">2 ♭ (Si♭ mayor / Sol menor)</option>
+          <option value="-3">3 ♭ (Mi♭ mayor / Do menor)</option>
+          <option value="-4">4 ♭ (La♭ mayor / Fa menor)</option>
+          <option value="-5">5 ♭ (Re♭ mayor / Si♭ menor)</option>
+          <option value="-6">6 ♭ (Sol♭ mayor / Mi♭ menor)</option>
+          <option value="-7">7 ♭ (Do♭ mayor / La♭ menor)</option>
+        </select>
+      </label>
       <label class="f">Compás
         <select id="meter">
           <option value="2">2/4</option>
           <option value="3">3/4</option>
           <option value="4" selected>4/4</option>
         </select>
+      </label>
+      <label class="f">Anacrusa (tiempos antes del primer compás)
+        <select id="pickup"><option value="0">Sin anacrusa</option></select>
       </label>
       <div class="f"><span>Transponer (semitonos)</span>
         <div class="stepper"><button id="tDown" aria-label="Bajar un semitono">−</button><output id="tVal">0</output><button id="tUp" aria-label="Subir un semitono">+</button></div>
@@ -288,7 +310,7 @@ footer a{color:inherit}
     <label class="f" style="margin-top:12px">Notas de la partitura (se actualizan solas al usar el pentagrama)
       <textarea id="score" spellcheck="false"></textarea>
     </label>
-    <p class="hint">Escribe las notas separadas por espacios: Do4 Re4 Mi♭4 Fa#4… (también C4 D4 Eb4). Do4 es el do central; sin octava se usa la 4. Para la duración añade dos puntos y el número de pulsos: Sol4:2 es una blanca, Re4:0.5 una corchea, Mi4:1.5 una negra con puntillo; sin duración, cada nota es una negra. Un guion es un silencio (-:2 dura dos pulsos). Una nota entre paréntesis es una nota de adorno (apoyatura) de la nota siguiente: (Re4) Do4. Una tilde ~ al final liga la nota con la siguiente, que debe ser igual: La4:0.5~ La4:2 se canta como una sola nota de dos pulsos y medio. Las barras | se ignoran.</p>
+    <p class="hint">Escribe las notas separadas por espacios: Do4 Re4 Mi♭4 Fa#4… (también C4 D4 Eb4). Do4 es el do central; sin octava se usa la 4. Para la duración añade dos puntos y el número de pulsos: Sol4:2 es una blanca, Re4:0.5 una corchea, Mi4:1.5 una negra con puntillo; sin duración, cada nota es una negra. Un guion es un silencio (-:2 dura dos pulsos). Una nota entre paréntesis es una nota de adorno (apoyatura) de la nota siguiente: (Re4) Do4. Una tilde ~ al final liga la nota con la siguiente, que debe ser igual: La4:0.5~ La4:2 se canta como una sola nota de dos pulsos y medio. Las barras | se ignoran. En el texto cada nota se escribe con su alteración real, también las de la armadura: en Fa mayor, Sib4.</p>
     <p class="hint" id="parseErr"></p>
     <label class="f" style="margin-top:12px">Letra de la canción
       <textarea id="lyrics" spellcheck="false" placeholder="Freu-de, schö-ner Göt-ter-fun-ken…"></textarea>
@@ -420,6 +442,8 @@ function snapshot(it){
   it.score = $('score').value; it.lyrics = $('lyrics').value;
   it.bpm = $('bpm').value; it.meter = $('meter').value; it.updated = Date.now();
   it.songOffset = $('songOffset').value;
+  it.keySig = $('keySig').value;
+  it.pickup = $('pickup').value;
 }
 function refreshLib(){
   const sel = $('libSel'); if (!sel) return;
@@ -455,6 +479,7 @@ function matchPreset(){
 function loadExample(i){
   const p = PRESETS[i]; if (!p) return;
   L.active = null; L.example = i; saveLib(); clearSong();
+  $('keySig').value = '0'; E.lastKey = 0; fillPickup('0');
   $('score').value = p[1]; $('lyrics').value = p[2] || '';
   S.syl = parseLyrics($('lyrics').value);
   applyScore(); refreshLib();
@@ -465,6 +490,8 @@ function openItem(it){
   if (it.bpm) $('bpm').value = it.bpm;
   if (it.meter) $('meter').value = it.meter;
   $('songOffset').value = it.songOffset || '0';
+  $('keySig').value = it.keySig || '0'; E.lastKey = keyFifths();
+  fillPickup(it.pickup || '0');
   S.syl = parseLyrics($('lyrics').value);
   applyScore(); refreshLib();
   loadSongFor(it.id);
@@ -594,7 +621,7 @@ function store(){
     localStorage.setItem('canto-v1', JSON.stringify({
       score:$('score').value, lyrics:$('lyrics').value, tol:$('tol').value, hold:$('hold').value, t:S.transpose,
       anyOct:$('anyOct').checked, names:$('names').checked, autoRef:$('autoRef').checked,
-      mode:S.mode, bpm:$('bpm').value, meter:$('meter').value, metro:$('metro').checked, instr:$('instr').value
+      mode:S.mode, bpm:$('bpm').value, meter:$('meter').value, metro:$('metro').checked, instr:$('instr').value, keySig:$('keySig').value, pickup:$('pickup').value
     }));
   }catch(e){}
   let it = activeItem();
@@ -629,6 +656,8 @@ function load(){
     $('autoRef').checked = !!d.autoRef;
     $('metro').checked = d.metro !== false;
     if (d.instr && INSTR.some(x => x[0] === d.instr)) $('instr').value = d.instr;
+    if (d.keySig !== undefined) $('keySig').value = String(d.keySig);
+    fillPickup(d.pickup || '0');
     if (d.mode === 'rhythm') S.mode = 'rhythm';
     $('panel').open = false;
     return true;
@@ -638,7 +667,7 @@ function load(){
 function buildNotes(){
   let start = 0;
   S.notes = S.source.map(n => {
-    const o = n.rest ? {...n} : (S.transpose ? {...spell(n.midi + S.transpose), dur:n.dur, grace:n.grace, tie:n.tie} : {...n});
+    const o = n.rest ? {...n} : (S.transpose ? {...spellInKey(n.midi + S.transpose, transposeKey(keyFifths(), S.transpose)), dur:n.dur, grace:n.grace, tie:n.tie} : {...n});
     o.start = start; start += o.dur; return o;
   });
   S.total = start;
@@ -667,6 +696,93 @@ function serializeLyrics(arr){
   a.forEach(x => { out += (x.t ? x.t.replace(/ /g,'~') : '_') + (x.t && x.h ? '-' : ' '); });
   return out.trim();
 }
+/* ---------- Anacrusa ---------- */
+function pickupBeats(){
+  const el = $('pickup'); if (!el) return 0;
+  const p = +el.value || 0, bpb = +$('meter').value;
+  return p > 0 && p < bpb ? p : 0;
+}
+// ¿Termina un compás después de «beats» pulsos?
+function isBarEnd(beats, bpb, pk){
+  if (beats < 1e-9 || beats < pk - 1e-6) return false;
+  const q = (beats - pk)/bpb;
+  return Math.abs(q - Math.round(q)) < 1e-6;
+}
+function fillPickup(keep){
+  const el = $('pickup'), bpb = +$('meter').value;
+  const v = keep !== undefined ? String(keep) : el.value;
+  el.innerHTML = '';
+  const add = (val, txt) => { const o = document.createElement('option'); o.value = val; o.textContent = txt; el.appendChild(o); };
+  add('0', 'Sin anacrusa');
+  for (let p = 0.5; p < bpb; p += 0.5){
+    const t = p === 0.5 ? '½ tiempo (corchea)' : (Number.isInteger(p) ? String(p) : (p - 0.5) + ' y ½') + (p === 1 ? ' tiempo' : ' tiempos');
+    add(String(p), t);
+  }
+  el.value = [...el.options].some(o => o.value === v) ? v : '0';
+}
+
+/* ---------- Armadura ---------- */
+const SHARP_ORDER = [3,0,4,1,5,2,6], FLAT_ORDER = [6,2,5,1,4,0,3];   // Fa Do Sol Re La Mi Si / Si Mi La Re Sol Do Fa
+const keyFifths = () => +($('keySig') ? $('keySig').value : 0) || 0;
+function keyAccOf(step, k){
+  const li = ((step % 7) + 7) % 7;
+  if (k > 0) return SHARP_ORDER.slice(0, k).includes(li) ? 1 : 0;
+  if (k < 0) return FLAT_ORDER.slice(0, -k).includes(li) ? -1 : 0;
+  return 0;
+}
+function transposeKey(k, T){
+  if (!T) return k;
+  const pc = (((7*k + T) % 12) + 12) % 12;
+  let best = null;
+  for (let f = -7; f <= 7; f++){
+    if ((((7*f) % 12) + 12) % 12 !== pc) continue;
+    const sc = Math.abs(f)*2 + (Math.sign(f) !== Math.sign(k || 1) ? 1 : 0);
+    if (best === null || sc < best.sc) best = {f, sc};
+  }
+  return best ? best.f : 0;
+}
+// Escribe una altura con el nombre de nota que mejor encaja en la armadura
+function spellInKey(midi, k){
+  const pc = ((midi % 12) + 12) % 12;
+  let best = null;
+  for (let li = 0; li < 7; li++) for (const a of [0, 1, -1, 2, -2]){
+    if ((((NAT[li] + a - pc) % 12) + 12) % 12 !== 0) continue;
+    const o = Math.round((midi - NAT[li] - a)/12) - 1;
+    const sc = (a === keyAccOf(li, k) ? 0 : 10) + Math.abs(a)*3 + (a !== 0 && Math.sign(a) !== Math.sign(k || 1) ? 1 : 0);
+    if (!best || sc < best.sc) best = {li, a, o, sc};
+  }
+  return {midi, step: best.o*7 + best.li, acc: best.a, label: LETNAME[best.li] + ACCSTR[best.a] + best.o};
+}
+// Alteraciones que hay que dibujar: solo las que difieren de la armadura o de lo ya alterado en el compás
+function shownAccs(notes, k, bpb){
+  const out = []; let beats = 0, bar = -1, state = {};
+  notes.forEach((n, i) => {
+    const pk = pickupBeats();
+    const b = beats < pk - 1e-6 ? -1 : Math.floor((beats - pk)/bpb + 1e-6);
+    if (b !== bar){ bar = b; state = {}; }
+    if (n.rest){ out.push(null); }
+    else {
+      const cur = (n.step in state) ? state[n.step] : keyAccOf(n.step, k);
+      const a = n.acc || 0;
+      out.push(a !== cur && !contAt(notes, i) ? a : null);
+      state[n.step] = a;
+    }
+    beats += n.dur;
+  });
+  return out;
+}
+const accGlyph = a => a === 0 ? '♮' : ACCSTR[a];
+function keySigWidth(k, gap){ return k ? Math.abs(k)*gap*0.75 + gap*0.5 : 0; }
+function drawKeySig(c, k, bass, Y, gap, x0, color){
+  if (!k) return;
+  const SH = [38,35,39,36,33,37,34], FL = [34,37,33,36,32,35,31];
+  const pos = (k > 0 ? SH : FL).slice(0, Math.abs(k)).map(st => bass ? st - 14 : st);
+  c.fillStyle = color;
+  c.font = (gap*1.6).toFixed(0) + 'px "Noto Music", "Segoe UI Symbol", serif';
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  pos.forEach((st, i) => c.fillText(k > 0 ? '♯' : '♭', x0 + i*gap*0.75, Y(st) - (k < 0 ? gap*0.2 : 0)));
+}
+
 function pitchOf(n){
   if (n.step === undefined) return n.midi;
   const o = Math.floor(n.step/7), li = ((n.step % 7) + 7) % 7;
@@ -983,7 +1099,8 @@ function startRhythm(){
   const c = ensureCtx();
   S.beatMs = 60000 / bpm();
   const bpb = +$('meter').value;
-  S.countBeats = bpb;
+  const pk = pickupBeats();
+  S.countBeats = pk > 0 ? 2*bpb - pk : bpb;   // compás de entrada y, con anacrusa, el resto del compás incompleto
   const lead = 0.25;
   const lat = (c.outputLatency || 0) + (c.baseLatency || 0);
   const ctxStart = c.currentTime + lead;
@@ -998,7 +1115,7 @@ function startRhythm(){
     playSong(ctxStart, 0);
   } else {
     S.tBeat0 = performance.now() + (lead + lat)*1000 + S.countBeats*S.beatMs;
-    const totalClicks = S.countBeats + Math.ceil(S.total);
+    const totalClicks = Math.ceil(S.countBeats + S.total);
     for (let k=0; k<totalClicks; k++){
       if (k >= S.countBeats && !$('metro').checked) break;
       click(S.metroGain, ctxStart + k*S.beatMs/1000, k % bpb === 0);
@@ -1247,7 +1364,9 @@ function draw(now){
   const hasLyr = S.syl.some(x => x.t);
   const cy = H/2 - (showNames ? 10 : 0) - (hasLyr ? 12 : 0);
   const Y = s => cy - (s - clef.center)*half;
-  const px = Math.max(118, W*0.32);
+  const kSig = transposeKey(keyFifths(), S.transpose), kW = keySigWidth(kSig, gap);
+  const px = Math.max(118 + Math.max(0, kW - 16), W*0.32);
+  const shown = shownAccs(notes, kSig, +$('meter').value);
   const rhythm = S.mode === 'rhythm';
   const ppb = Math.max(56, Math.min(92, W/8));
   const spacing = Math.max(58, Math.min(80, W/9));
@@ -1279,7 +1398,8 @@ function draw(now){
   if (rhythm){
     const bpb = +$('meter').value;
     g.lineWidth = 1;
-    for (let k=bpb; k<=S.total+0.001; k+=bpb){
+    const pk = pickupBeats();
+    for (let k = pk > 0 ? pk : bpb; k<=S.total+0.001; k+=bpb){
       const x = px + (k - vb)*ppb - ppb*0.18 - shift;
       if (x < 60 || x > W) continue;
       g.beginPath(); g.moveTo(x, Y(clef.top)); g.lineTo(x, Y(clef.bottom)); g.stroke();
@@ -1288,21 +1408,8 @@ function draw(now){
   g.globalAlpha = 1;
 
   // Clave
-  const glyph = bass ? '𝄢' : '𝄞';
-  if (musicFontOk){
-    g.fillStyle = colors.staff;
-    g.font = '100px "Noto Music"';
-    const mt = g.measureText(glyph);
-    const gh = (mt.actualBoundingBoxAscent + mt.actualBoundingBoxDescent) || 100;
-    const sc = (bass ? gap*3.3 : gap*6.6)/gh;
-    g.font = (100*sc).toFixed(1) + 'px "Noto Music"';
-    const topY = bass ? Y(clef.top) - gap*0.1 : Y(clef.top) - gap*1.35;
-    g.textBaseline = 'alphabetic'; g.textAlign = 'left';
-    g.fillText(glyph, 14, topY + mt.actualBoundingBoxAscent*sc);
-  } else {
-    g.fillStyle = colors.muted; g.font = '600 12px Inter, sans-serif'; g.textBaseline = 'middle'; g.textAlign = 'left';
-    g.fillText(bass ? 'Clave de Fa' : 'Clave de Sol', 12, Y(clef.top) - gap*1.2);
-  }
+  drawClefOn(g, bass, Y, clef, gap, 14);
+  drawKeySig(g, kSig, bass, Y, gap, 14 + gap*2.9, colors.staff);
 
   // Franja de lectura
   g.fillStyle = colors.orange; g.globalAlpha = 0.10;
@@ -1351,9 +1458,9 @@ function draw(now){
       const sx = x + half*0.68, ey = y - gap*2.3;
       g.lineWidth = 1.3; g.beginPath(); g.moveTo(sx, y); g.lineTo(sx, ey); g.stroke();
       g.lineWidth = 1.6; g.beginPath(); g.moveTo(sx, ey); g.quadraticCurveTo(sx + gap*0.8, ey + gap*0.6, sx + gap*0.55, ey + gap*1.4); g.stroke();
-      if (n.acc){
+      if (shown[i] !== null){
         g.font = (gap*1.1).toFixed(0) + 'px "Noto Music", "Segoe UI Symbol", serif';
-        g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(ACCSTR[n.acc], x - half*2, y);
+        g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(accGlyph(shown[i]), x - half*2, y);
       }
       const nn = notes[i+1];
       if (nn && !nn.rest){
@@ -1396,10 +1503,10 @@ function draw(now){
       const onLine = (((n.step - clef.bottom) % 2) + 2) % 2 === 0;
       g.beginPath(); g.arc(x + half*2.1, onLine ? y - half : y, 2.4, 0, Math.PI*2); g.fill();
     }
-    if (n.acc){
+    if (shown[i] !== null){
       g.font = (gap*1.5).toFixed(0) + 'px "Noto Music", "Segoe UI Symbol", serif';
       g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText(ACCSTR[n.acc], x - half*2.6, y);
+      g.fillText(accGlyph(shown[i]), x - half*2.6, y);
     }
     if (!rhythm && current && S.hold > 0){
       g.strokeStyle = colors.green; g.lineWidth = 3;
@@ -1484,7 +1591,8 @@ function draw(now){
 const FIG = [[4,'Redonda','𝅝'],[2,'Blanca','𝅗𝅥'],[1,'Negra','𝅘𝅥'],[0.5,'Corchea','𝅘𝅥𝅮'],[0.25,'Semicorchea','𝅘𝅥𝅯']];
 const RESTG = {4:'𝄻',2:'𝄼',1:'𝄽',0.5:'𝄾',0.25:'𝄿'};
 const ACCT = [[0,'♮','Sin alteración'],[1,'♯','Sostenido'],[-1,'♭','Bemol']];
-const E = {sel:-1, base:1, dot:false, acc:0, grace:false, layout:[], sylFor:-1};
+const E = {sel:-1, base:1, dot:false, acc:'k', grace:false, layout:[], sylFor:-1, lastKey:0};
+const newAcc = step => E.acc === 'k' ? keyAccOf(step, keyFifths()) : E.acc;
 const pitchedBefore = (ns, i) => { let k = 0; for (let j = 0; j < i && j < ns.length; j++) if (sylNote(ns, j)) k++; return k; };
 // Ajusta la letra cuando una nota pasa a ser (o deja de ser) continuación de una ligadura
 function reconcileTies(before, ns){
@@ -1521,7 +1629,7 @@ function serialize(notes){
       out.push(n.grace ? '(' + nm + ')' : nm + d + (n.tie ? '~' : ''));
     }
     beats += n.dur;
-    if (n.dur > 0 && i < notes.length-1 && Math.abs(beats/bpb - Math.round(beats/bpb)) < 1e-6) out.push('|');
+    if (n.dur > 0 && i < notes.length-1 && isBarEnd(beats, bpb, pickupBeats())) out.push('|');
   });
   return out.join(' ');
 }
@@ -1537,9 +1645,9 @@ const copyNotes = () => S.source.map(n => ({...n}));
 function syncTools(){
   const n = S.source[E.sel];
   if (n && !n.grace){ const sd = splitDur(n.dur); E.base = sd.base; E.dot = sd.dot; }
-  if (n && !n.rest) E.acc = n.acc || 0;
   document.querySelectorAll('#durTools button').forEach(b => b.setAttribute('aria-pressed', +b.dataset.v === E.base));
-  document.querySelectorAll('#accTools button').forEach(b => b.setAttribute('aria-pressed', +b.dataset.v === E.acc));
+  const selAcc = n && !n.rest ? (n.acc || 0) : E.acc;
+  document.querySelectorAll('#accTools button').forEach(b => b.setAttribute('aria-pressed', +b.dataset.v === selAcc));
   $('eDot').setAttribute('aria-pressed', E.dot);
   $('eGrace').setAttribute('aria-pressed', n ? !!n.grace : E.grace);
 }
@@ -1547,7 +1655,7 @@ function updateSel(){
   const n = S.source[E.sel];
   $('eSel').textContent = n
     ? 'Seleccionada: nota ' + (E.sel+1) + ', ' + (n.rest ? 'silencio de ' + figName(n.dur) : n.label + ', ' + (n.grace ? 'nota de adorno' : figName(n.dur))) + '.'
-    : (E.grace ? 'Modo adorno: las notas que toques serán notas de adorno de la nota siguiente.' : 'Figura elegida: ' + figName(eDur()) + '. Toca el pentagrama para añadir notas.');
+    : (E.grace ? 'Modo adorno: las notas que toques serán notas de adorno de la nota siguiente.' : 'Figura elegida: ' + figName(eDur()) + (E.acc !== 'k' ? ', con ' + accGlyph(E.acc) : '') + '. Toca el pentagrama para añadir notas.');
   const isP = !!(n && !n.rest && !n.grace && !contAt(S.source, E.sel));
   $('sylBox').hidden = !isP;
   if (isP && E.sylFor !== E.sel){
@@ -1560,14 +1668,12 @@ function updateSel(){
 function drawClefOn(c, bass, Y, clef, gap, x0){
   const glyph = bass ? '𝄢' : '𝄞';
   if (musicFontOk){
-    c.fillStyle = colors.staff; c.font = '100px "Noto Music"';
-    const mt = c.measureText(glyph);
-    const gh = (mt.actualBoundingBoxAscent + mt.actualBoundingBoxDescent) || 100;
-    const sc = (bass ? gap*3.3 : gap*6.6)/gh;
-    c.font = (100*sc).toFixed(1) + 'px "Noto Music"';
-    const topY = bass ? Y(clef.top) - gap*0.1 : Y(clef.top) - gap*1.35;
+    // En Noto Music un espacio del pentagrama mide 0,244 em y la primera línea está 0,012 em sobre la línea base.
+    // Con ese tamaño, la espiral de la clave de Sol cae en la segunda línea (Sol) y los puntos de la de Fa rodean la cuarta (Fa).
+    const F = gap/0.244;
+    c.fillStyle = colors.staff; c.font = F.toFixed(1) + 'px "Noto Music"';
     c.textBaseline = 'alphabetic'; c.textAlign = 'left';
-    c.fillText(glyph, x0, topY + mt.actualBoundingBoxAscent*sc);
+    c.fillText(glyph, x0, Y(clef.bottom) + 0.012*F);
   } else {
     c.fillStyle = colors.muted; c.font = '600 12px Inter, sans-serif'; c.textBaseline = 'middle'; c.textAlign = 'left';
     c.fillText(bass ? 'Fa' : 'Sol', x0, Y(clef.top) - gap*1.2);
@@ -1578,14 +1684,16 @@ function drawEditor(){
   const gap = 12, half = 6, H = 230, cy = 100, clef = edClef(), bass = clef.center === 22;
   const Y = s => cy - (s - clef.center)*half;
   const bpb = +$('meter').value;
-  let x = 66, beats = 0; const bars = []; E.layout = [];
+  const kSig = keyFifths(), shown = shownAccs(notes, kSig, bpb);
+  let x = 66 + keySigWidth(kSig, gap), beats = 0; const bars = []; E.layout = [];
   eg.font = '500 14px Inter, sans-serif';
-  notes.forEach(n => {
-    let w = 26 + 16*Math.sqrt(Math.min(n.dur, 6)) + (n.acc ? 12 : 0);
+  notes.forEach((n, i) => {
+    const hasAcc = shown[i] !== null;
+    let w = 26 + 16*Math.sqrt(Math.min(n.dur, 6)) + (hasAcc ? 12 : 0);
     if (!n.rest && n.syl && n.syl.t) w = Math.max(w, eg.measureText(n.syl.t + '-').width + 12);
-    E.layout.push({x: x + w/2 + (n.acc ? 6 : 0), hw: w/2});
+    E.layout.push({x: x + w/2 + (hasAcc ? 6 : 0), hw: w/2});
     x += w; beats += n.dur;
-    if (n.dur > 0 && Math.abs(beats/bpb - Math.round(beats/bpb)) < 1e-6){ bars.push(x + 4); x += 10; }
+    if (n.dur > 0 && isBarEnd(beats, bpb, pickupBeats())){ bars.push(x + 4); x += 10; }
   });
   const endX = x;
   const W = Math.max(box.clientWidth || 300, endX + 80);
@@ -1598,6 +1706,7 @@ function drawEditor(){
   for (let k=0;k<5;k++){ const y = Y(clef.bottom+2*k); c.beginPath(); c.moveTo(8,y); c.lineTo(W-8,y); c.stroke(); }
   bars.forEach(bx => { c.beginPath(); c.moveTo(bx, Y(clef.top)); c.lineTo(bx, Y(clef.bottom)); c.stroke(); });
   drawClefOn(c, bass, Y, clef, gap, 12);
+  drawKeySig(c, kSig, bass, Y, gap, 12 + gap*3, colors.staff);
 
   notes.forEach((n,i) => {
     const L = E.layout[i], nx = L.x, sel = i === E.sel;
@@ -1625,7 +1734,7 @@ function drawEditor(){
       const sx = nx + half*0.75, ey = y - gap*2.4;
       c.lineWidth = 1.2; c.beginPath(); c.moveTo(sx, y); c.lineTo(sx, ey); c.stroke();
       c.lineWidth = 1.5; c.beginPath(); c.moveTo(sx, ey); c.quadraticCurveTo(sx + gap*0.8, ey + gap*0.6, sx + gap*0.55, ey + gap*1.4); c.stroke();
-      if (n.acc){ c.font = (gap*1.2).toFixed(0) + 'px "Noto Music", "Segoe UI Symbol", serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(ACCSTR[n.acc], nx - half*2.2, y); }
+      if (shown[i] !== null){ c.font = (gap*1.2).toFixed(0) + 'px "Noto Music", "Segoe UI Symbol", serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(accGlyph(shown[i]), nx - half*2.2, y); }
       const nn = notes[i+1], NL = E.layout[i+1];
       if (nn && !nn.rest && NL){
         const y2 = Y(nn.step);
@@ -1653,10 +1762,10 @@ function drawEditor(){
       const onLine = (((n.step - clef.bottom) % 2) + 2) % 2 === 0;
       c.beginPath(); c.arc(nx + half*2.1, onLine ? y - half : y, 2.2, 0, Math.PI*2); c.fill();
     }
-    if (n.acc){
+    if (shown[i] !== null){
       c.font = (gap*1.6).toFixed(0) + 'px "Noto Music", "Segoe UI Symbol", serif';
       c.textAlign = 'center'; c.textBaseline = 'middle';
-      c.fillText(ACCSTR[n.acc], nx - half*2.8, y);
+      c.fillText(accGlyph(shown[i]), nx - half*2.8, y);
     }
     if (n.syl && n.syl.t){
       c.fillStyle = sel ? colors.orange : colors.ink;
@@ -1706,10 +1815,9 @@ function edInit(){
     b.dataset.v = v; b.title = name; b.setAttribute('aria-label', name);
     b.innerHTML = '<span class="mg">' + gl + '</span>';
     b.addEventListener('click', () => {
-      E.acc = v;
       const n = S.source[E.sel];
       if (n && !n.rest){ const ns = copyNotes(), before = contFlags(ns); ns[E.sel].acc = v; reconcileTies(before, ns); commit(ns, E.sel); soundStep(ns[E.sel]); }
-      else syncTools();
+      else { E.acc = E.acc === v ? 'k' : v; syncTools(); updateSel(); }   // se aplica a la próxima nota
     });
     $('accTools').appendChild(b);
   });
@@ -1725,7 +1833,8 @@ function edInit(){
       if (n.grace){ delete n.grace; n.dur = eDur(); lyricInsert(pitchedBefore(ns, E.sel)); commit(ns, E.sel); return; }
       // Añade un adorno delante de la nota seleccionada, un grado por encima; luego se mueve con ↑ ↓
       const cl = edClef();
-      const gn = {step: Math.min(cl.center + 12, n.step + 1), acc: 0, dur: 0, grace: true};
+      const gs = Math.min(cl.center + 12, n.step + 1);
+      const gn = {step: gs, acc: keyAccOf(gs, keyFifths()), dur: 0, grace: true};
       ns.splice(E.sel, 0, gn); E.grace = false;
       commit(ns, E.sel); soundStep(gn); return;
     }
@@ -1745,7 +1854,7 @@ function edInit(){
     const ns = copyNotes(), n = ns[E.sel];
     if (n){
       const pi = pitchedBefore(ns, E.sel);
-      if (n.rest){ lyricInsert(pi); ns[E.sel] = {step: edClef().center, acc: 0, dur: n.dur}; }
+      if (n.rest){ lyricInsert(pi); ns[E.sel] = {step: edClef().center, acc: keyAccOf(edClef().center, keyFifths()), dur: n.dur}; }
       else { if (!n.grace) lyricRemove(pi); ns[E.sel] = {rest: true, dur: n.grace ? eDur() : n.dur}; }
       commit(ns, E.sel);
     } else { ns.push({rest: true, dur: eDur()}); commit(ns, -1, true); }
@@ -1755,7 +1864,9 @@ function edInit(){
     if (!n || n.rest) return;
     const cl = edClef();
     const before = contFlags(ns);
+    const followsKey = (n.acc || 0) === keyAccOf(n.step, keyFifths());
     n.step = Math.max(cl.center-12, Math.min(cl.center+12, n.step + d));
+    if (followsKey) n.acc = keyAccOf(n.step, keyFifths());   // al mover, la nota sigue la armadura
     reconcileTies(before, ns);
     commit(ns, E.sel); soundStep(n);
   };
@@ -1772,6 +1883,14 @@ function edInit(){
     commit([], -1);
   });
   $('eClef').addEventListener('change', drawEditor);
+  E.lastKey = keyFifths();
+  $('keySig').addEventListener('change', () => {
+    const oldK = E.lastKey, newK = keyFifths(); E.lastKey = newK;
+    const ns = copyNotes(), before = contFlags(ns);
+    ns.forEach(n => { if (!n.rest && (n.acc || 0) === keyAccOf(n.step, oldK)) n.acc = keyAccOf(n.step, newK); });
+    reconcileTies(before, ns);
+    commit(ns, E.sel);
+  });
   ec.addEventListener('click', e => {
     const r = ec.getBoundingClientRect();
     const x = e.clientX - r.left, y = e.clientY - r.top;
@@ -1787,7 +1906,8 @@ function edInit(){
       return;
     }
     const idx = E.layout.filter(L => L.x < x).length;
-    const n = E.grace ? {step, acc: E.acc, dur: 0, grace: true} : {step, acc: E.acc, dur: eDur()};
+    const a = newAcc(step); E.acc = 'k';
+    const n = E.grace ? {step, acc: a, dur: 0, grace: true} : {step, acc: a, dur: eDur()};
     if (!n.grace) lyricInsert(pitchedBefore(ns, idx));
     else E.grace = false;   // tras una nota de adorno se vuelve a escribir notas normales
     ns.splice(idx, 0, n);
@@ -2092,9 +2212,12 @@ $('mRhythm').addEventListener('click', () => setMode('rhythm'));
 $('tDown').addEventListener('click', () => { S.transpose = Math.max(-12, S.transpose-1); buildNotes(); reset(); store(); });
 $('tUp').addEventListener('click', () => { S.transpose = Math.min(12, S.transpose+1); buildNotes(); reset(); store(); });
 ['tol','hold','anyOct','names','autoRef','metro'].forEach(id => $(id).addEventListener('change', store));
-['bpm','meter'].forEach(id => $(id).addEventListener('change', () => { if (S.mode === 'rhythm') reset(); store(); drawEditor(); }));
+$('bpm').addEventListener('change', () => { if (S.mode === 'rhythm') reset(); store(); drawEditor(); });
+$('meter').addEventListener('change', () => { fillPickup(); commit(copyNotes(), E.sel); });
+$('pickup').addEventListener('change', () => commit(copyNotes(), E.sel));
 
 // Inicio
+fillPickup('0');
 INSTR.forEach(([v,name]) => { const o = document.createElement('option'); o.value = v; o.textContent = name; $('instr').appendChild(o); });
 $('instr').addEventListener('change', () => {
   store();
